@@ -1,4 +1,4 @@
-import { PLAN, TEMPO, findDay } from "./plan.js";
+import { CATALOG, MUSCLES } from "./catalog.js";
 import * as db from "./db.js";
 import * as dbx from "./dropbox.js";
 import * as sync from "./sync.js";
@@ -6,20 +6,24 @@ import * as sync from "./sync.js";
 // ---------- state ----------
 
 const state = {
-  view: "workout",      // workout | history | exercise | settings
-  dayId: "d1",
+  view: "workout",      // workout | history | exercise | routines | routine | picker | settings
+  dayId: null,
   date: today(),
   followToday: true,    // keep the date on "today" if the app stays open past midnight
-  exerciseId: null,     // for the exercise history view
+  exerciseId: null,     // exercise history view
+  routineId: null,      // routine editor
+  openRow: null,        // expanded exercise row in the editor
+  picker: null,         // { mode: "add" | "swap", dayId, rowId }
+  pickerQuery: "",
+  pickerMuscle: "All",
+  extraSets: {},        // "date|exerciseId" -> extra rows added with "+ Set"
   renderPending: false, // a sync pulled new data while the user was typing
+  backTo: "workout",
 };
 
 const main = document.getElementById("main");
 const banner = document.getElementById("banner");
 const syncEl = document.getElementById("sync");
-
-const EXERCISE_NAMES = new Map();
-for (const day of PLAN) for (const ex of day.exercises) if (!EXERCISE_NAMES.has(ex.id)) EXERCISE_NAMES.set(ex.id, ex.name);
 
 // ---------- small helpers ----------
 
@@ -35,7 +39,7 @@ function prettyDate(iso, opts = { weekday: "short", month: "short", day: "numeri
 }
 
 function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 function unit() {
@@ -57,75 +61,101 @@ function fmt(n) {
 }
 
 function setText(s) {
-  const w = toUnit(s.weight, s.unit);
-  return `${fmt(w)}×${s.reps}`;
+  return `${fmt(toUnit(s.weight, s.unit))}×${s.reps}`;
 }
 
-function rangeText(r) {
-  return r[0] === r[1] ? `${r[0]}` : `${r[0]}–${r[1]}`;
+function rangeText(lo, hi) {
+  return lo === hi ? `${lo}` : `${lo}–${hi}`;
 }
 
 function inputFocused() {
   const a = document.activeElement;
-  return a && a.tagName === "INPUT" && main.contains(a);
+  return a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA") && main.contains(a);
+}
+
+function go(view, extra = {}) {
+  Object.assign(state, extra, { view });
+  render();
+  window.scrollTo(0, 0);
+}
+
+// Superset letters: consecutive rows joined by superset_next share a letter.
+function supersetLetters(rows) {
+  const out = new Map();
+  let letter = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const joinedPrev = i > 0 && rows[i - 1].superset_next && out.has(rows[i - 1].id);
+    const joinsNext = rows[i].superset_next && i < rows.length - 1;
+    if (joinedPrev) out.set(rows[i].id, out.get(rows[i - 1].id));
+    else if (joinsNext) out.set(rows[i].id, String.fromCharCode(65 + letter++));
+  }
+  return out;
+}
+
+async function changed() {
+  await sync.changed();
 }
 
 // ---------- workout view ----------
 
-function defaultDay() {
-  // Something already logged today? Stay on that day.
-  const todays = db.history(1)[0];
-  if (todays && todays.date === state.date) return todays.dayId;
-  // Otherwise the day after the last one you did.
-  const last = db.lastDayLogged();
-  if (!last) return PLAN[0].id;
-  const i = PLAN.findIndex((d) => d.id === last);
-  return PLAN[(i + 1) % PLAN.length].id;
+function activeDays() {
+  const rid = db.activeRoutineId();
+  return rid ? db.days(rid) : [];
 }
 
-function warmup(ex, last) {
-  if (!ex.main || !last || !last.sets.length) return "";
+function defaultDay() {
+  const list = activeDays();
+  if (!list.length) return null;
+  const ids = list.map((d) => d.id);
+  // Something already logged on this date? Stay on that day.
+  const loggedToday = db.daysLoggedOn(state.date).find((id) => ids.includes(id));
+  if (loggedToday) return loggedToday;
+  // Otherwise the day after the last one you did.
+  const last = db.lastDayLogged(ids);
+  if (!last) return ids[0];
+  return ids[(ids.indexOf(last) + 1) % ids.length];
+}
+
+function warmup(row, last) {
+  if (!row.warmup || !last || !last.sets.length) return "";
   const top = Math.max(...last.sets.map((s) => toUnit(s.weight, s.unit) ?? 0));
   if (!(top > 0)) return "";
   const step = unit() === "kg" ? 2 : 5;
   const r = (x) => Math.max(step, Math.round(x / step) * step);
-  const a = `${r(top * 0.6)}–${r(top * 0.67)}`;
-  const b = `${r(top * 0.73)}–${r(top * 0.8)}`;
-  return `Warm-up: ${a} × 6–8, optional ${b} × 4–6`;
+  return `Warm-up: ${r(top * 0.6)}–${r(top * 0.67)} × 6–8, optional ${r(top * 0.73)}–${r(top * 0.8)} × 4–6`;
 }
 
-function progression(ex, last) {
-  if (!last) return "";
-  const needed = ex.minSets || ex.sets;
-  if (last.sets.length < needed) return "";
-  if (!last.sets.every((s) => s.reps >= ex.reps[1])) return "";
-  const assisted = last.sets.some((s) => s.weight < 0);
-  return assisted
+function progression(row, last) {
+  if (!last || last.sets.length < row.sets) return "";
+  if (!last.sets.every((s) => s.reps >= row.rep_hi)) return "";
+  return last.sets.some((s) => s.weight < 0)
     ? "↑ Top of the range on every set last time. Use less assistance."
     : "↑ Top of the range on every set last time. Add weight.";
 }
 
-function cardHtml(day, ex) {
-  const logged = db.setsOn(state.date, ex.id);
-  const last = db.lastSession(ex.id, state.date);
-  const loggedCount = Object.keys(logged).length;
-  const done = loggedCount >= (ex.minSets || ex.sets);
-  const setsLabel = ex.minSets ? `${ex.minSets}–${ex.sets}` : `${ex.sets}`;
+function cardHtml(row, letter) {
+  const ex = db.exercise(row.exercise_id);
+  const logged = db.setsOn(state.date, row.exercise_id);
+  const last = db.lastSession(row.exercise_id, state.date);
+  const loggedNos = Object.keys(logged).map(Number);
+  const extra = state.extraSets[`${state.date}|${row.exercise_id}`] || 0;
+  const count = Math.max(row.sets, ...loggedNos, 0) + extra;
+  const done = loggedNos.length >= row.sets;
 
   let rows = "";
-  for (let n = 1; n <= ex.sets; n++) {
+  for (let n = 1; n <= count; n++) {
     const s = logged[n];
-    // Placeholders: weight from the set you just did today, else last session;
+    // Placeholders: weight from the set you just did, else last session;
     // reps from the same set last session. A blank box logs its placeholder.
     const prev = last ? last.sets.find((x) => x.set_no === n) || last.sets[last.sets.length - 1] : null;
     const earlier = logged[n - 1];
     const wSrc = earlier || prev;
     const phW = wSrc ? fmt(toUnit(wSrc.weight, wSrc.unit)) : unit();
-    const phR = prev ? prev.reps : earlier ? earlier.reps : `${ex.reps[0]}–${ex.reps[1]}`;
-    const optional = ex.minSets && n > ex.minSets ? `<span class="optional">opt</span>` : "";
+    const phR = prev ? prev.reps : earlier ? earlier.reps : rangeText(row.rep_lo, row.rep_hi);
+    const bonus = n > row.sets ? `<span class="optional">extra</span>` : "";
     rows += `
       <div class="set${s ? " logged" : ""}" data-set="${n}">
-        <span class="n">${n}${optional}</span>
+        <span class="n">${n}${bonus}</span>
         <input class="w" type="text" inputmode="decimal" autocomplete="off" aria-label="Set ${n} weight"
           value="${s ? esc(fmt(toUnit(s.weight, s.unit))) : ""}" placeholder="${esc(phW)}">
         <span class="x">×</span>
@@ -137,55 +167,77 @@ function cardHtml(day, ex) {
 
   const lastLine = last
     ? `<p class="info">Last (${esc(prettyDate(last.date, { month: "short", day: "numeric" }))}): ${last.sets.map(setText).join(" · ")}</p>`
-    : `<p class="info">No history yet. Pick a weight you can do ${ex.reps[1]} clean reps with at this tempo.</p>`;
-  const up = progression(ex, last);
-  const wu = warmup(ex, last);
+    : `<p class="info">No history yet. Pick a weight you can do ${row.rep_hi} clean reps with.</p>`;
+  const up = progression(row, last);
+  const wu = warmup(row, last);
 
   return `
-    <section class="card${done ? " done" : ""}" id="card-${esc(ex.id)}" data-ex="${esc(ex.id)}">
+    <section class="card${done ? " done" : ""}" id="card-${esc(row.exercise_id)}" data-ex="${esc(row.exercise_id)}" data-row="${esc(row.id)}">
       <div class="card-head">
-        <h2><button class="ex-name" data-ex="${esc(ex.id)}">${esc(ex.name)}</button>${ex.superset ? `<span class="tag">SUPERSET ${esc(ex.superset)}</span>` : ""}</h2>
-        <span class="target">${setsLabel} × ${rangeText(ex.reps)}</span>
+        <h2><button class="ex-name" data-act="ex-history" data-id="${esc(row.exercise_id)}">${esc(ex.name)}</button>${letter ? `<span class="tag">SUPERSET ${letter}</span>` : ""}</h2>
+        <span class="target">${row.sets} × ${rangeText(row.rep_lo, row.rep_hi)}</span>
       </div>
       ${lastLine}
       ${up ? `<p class="info up">${esc(up)}</p>` : ""}
       ${wu ? `<p class="info">${esc(wu)}</p>` : ""}
-      <details><summary>Form cues</summary><p>${esc(ex.note)}</p></details>
+      ${ex.cues ? `<details><summary>Form cues</summary><p>${esc(ex.cues)}</p></details>` : ""}
       <div class="col-labels"><span></span><span>${esc(unit())}</span><span></span><span>reps</span><span></span></div>
       <div class="sets">${rows}</div>
+      <button class="add-set" data-act="add-set">+ Set</button>
     </section>`;
 }
 
 function renderWorkout() {
-  const day = findDay(state.dayId);
+  const rid = db.activeRoutineId();
+  if (!rid) {
+    main.innerHTML = `<p class="empty">No routine yet.</p><p style="text-align:center"><button class="btn primary" data-act="new-routine">Create a routine</button></p>`;
+    return;
+  }
+  const r = db.routine(rid);
+  const list = db.days(rid);
+  if (!list.length) {
+    main.innerHTML = `
+      <button class="routine-link" data-act="routines">${esc(r.name)} ›</button>
+      <p class="empty">This routine has no days yet.</p>
+      <p style="text-align:center"><button class="btn primary" data-act="edit-routine" data-id="${esc(rid)}">Edit routine</button></p>`;
+    return;
+  }
+  if (!list.some((d) => d.id === state.dayId)) state.dayId = defaultDay();
+  const day = list.find((d) => d.id === state.dayId);
+  const rows = db.dayExercises(day.id);
+  const letters = supersetLetters(rows);
   const isToday = state.date === today();
+
   main.innerHTML = `
+    <button class="routine-link" data-act="routines">${esc(r.name)} ›</button>
     <div class="days">
-      ${PLAN.map((d) => `
-        <button class="day${d.id === day.id ? " active" : ""}" data-day="${d.id}">
-          <small>${esc(d.name)}</small><b>${esc(d.title)}</b>
+      ${list.map((d, i) => `
+        <button class="day${d.id === day.id ? " active" : ""}" data-act="day" data-id="${esc(d.id)}">
+          <small>Day ${i + 1}</small><b>${esc(d.name)}</b>
         </button>`).join("")}
     </div>
     <div class="dateline">
-      <h1>${esc(day.title)}<span>${esc(day.focus)}</span></h1>
+      <h1>${esc(day.name)}${day.subtitle ? `<span>${esc(day.subtitle)}</span>` : ""}</h1>
       <input type="date" id="date" value="${state.date}" max="${today()}" aria-label="Workout date">
     </div>
-    <p class="tempo">${isToday ? "" : `<b>Editing ${esc(prettyDate(state.date))}.</b> `}Tempo <b>${TEMPO}</b>: 3s down · 1s pause · 2s up · 1s pause</p>
-    ${day.exercises.map((ex) => cardHtml(day, ex)).join("")}
+    ${!isToday || r.tempo ? `<p class="tempo">${isToday ? "" : `<b>Editing ${esc(prettyDate(state.date))}.</b> `}${r.tempo ? `Tempo <b>${esc(r.tempo)}</b>` : ""}</p>` : ""}
+    ${rows.length ? rows.map((row) => cardHtml(row, letters.get(row.id))).join("")
+      : `<p class="empty">No exercises on this day. <button class="linkish" data-act="edit-routine" data-id="${esc(rid)}">Add some</button>.</p>`}
   `;
 }
 
 function rerenderCard(exId) {
-  const day = findDay(state.dayId);
-  const ex = day.exercises.find((e) => e.id === exId);
   const el = document.getElementById(`card-${exId}`);
-  if (!ex || !el) return;
-  el.outerHTML = cardHtml(day, ex);
+  if (!el) return;
+  const rows = db.dayExercises(state.dayId);
+  const row = rows.find((r) => r.id === el.dataset.row);
+  if (!row) return render();
+  el.outerHTML = cardHtml(row, supersetLetters(rows).get(row.id));
 }
 
-function readSet(row) {
-  const w = row.querySelector(".w");
-  const r = row.querySelector(".r");
+function readSet(rowEl) {
+  const w = rowEl.querySelector(".w");
+  const r = rowEl.querySelector(".r");
   const wRaw = (w.value.trim() || w.placeholder).replace(",", ".");
   const rRaw = r.value.trim() || r.placeholder;
   const weight = /^-?\d+(\.\d+)?$/.test(wRaw) ? Number(wRaw) : NaN;
@@ -197,28 +249,35 @@ function readSet(row) {
   return { weight, reps };
 }
 
-async function toggleSet(row) {
-  const card = row.closest(".card");
-  const exId = card.dataset.ex;
-  const setNo = Number(row.dataset.set);
-  if (row.classList.contains("logged")) {
-    db.deleteSet(state.date, exId, setNo);
+function logFromRow(rowEl, v) {
+  const exId = rowEl.closest(".card").dataset.ex;
+  const d = db.day(state.dayId);
+  db.logSet({
+    date: state.date, dayId: state.dayId, dayName: d ? d.name : null, exerciseId: exId,
+    setNo: Number(rowEl.dataset.set), weight: v.weight, reps: v.reps, unit: unit(),
+  });
+  return exId;
+}
+
+async function toggleSet(rowEl) {
+  const exId = rowEl.closest(".card").dataset.ex;
+  if (rowEl.classList.contains("logged")) {
+    db.deleteSet(state.date, exId, Number(rowEl.dataset.set));
   } else {
-    const v = readSet(row);
+    const v = readSet(rowEl);
     if (!v) return;
-    db.logSet({ date: state.date, dayId: state.dayId, exerciseId: exId, setNo, weight: v.weight, reps: v.reps, unit: unit() });
+    logFromRow(rowEl, v);
   }
   rerenderCard(exId);
-  await sync.changed();
+  await changed();
 }
 
 // Editing the numbers on a set that's already logged saves the new values.
-async function editLoggedSet(row) {
-  const v = readSet(row);
+async function editLoggedSet(rowEl) {
+  const v = readSet(rowEl);
   if (!v) return;
-  const exId = row.closest(".card").dataset.ex;
-  db.logSet({ date: state.date, dayId: state.dayId, exerciseId: exId, setNo: Number(row.dataset.set), weight: v.weight, reps: v.reps, unit: unit() });
-  await sync.changed();
+  logFromRow(rowEl, v);
+  await changed();
 }
 
 // ---------- history views ----------
@@ -230,35 +289,186 @@ function renderHistory() {
     return;
   }
   main.innerHTML = `<h1 class="page-title">History</h1>` + sessions.map((s) => {
-    const day = findDay(s.dayId);
     const byEx = new Map();
     for (const x of s.sets) {
       if (!byEx.has(x.exercise_id)) byEx.set(x.exercise_id, []);
       byEx.get(x.exercise_id).push(x);
     }
-    // Keep plan order.
-    const order = day.exercises.map((e) => e.id).filter((id) => byEx.has(id));
-    for (const id of byEx.keys()) if (!order.includes(id)) order.push(id);
+    // Plan order if the day still exists, else the order sets were logged.
+    const planOrder = db.dayExercises(s.dayId).map((r) => r.exercise_id).filter((id) => byEx.has(id));
+    const order = [...planOrder, ...[...byEx.keys()].filter((id) => !planOrder.includes(id))];
     return `
       <section class="card session">
-        <h3>${esc(prettyDate(s.date))} <span>· ${esc(day.name)} ${esc(day.title)}</span></h3>
+        <h3>${esc(prettyDate(s.date))}${s.dayName ? ` <span>· ${esc(s.dayName)}</span>` : ""}</h3>
         ${order.map((id) => `
-          <div class="row"><span class="name">${esc(EXERCISE_NAMES.get(id) || id)}</span>
-          <span class="vals">${byEx.get(id).map(setText).join(" · ")}</span></div>`).join("")}
+          <div class="row"><button class="name linkish" data-act="ex-history" data-id="${esc(id)}">${esc(db.exercise(id).name)}</button>
+          <span class="vals">${byEx.get(id).sort((a, b) => a.set_no - b.set_no).map(setText).join(" · ")}</span></div>`).join("")}
       </section>`;
   }).join("");
 }
 
 function renderExercise() {
-  const name = EXERCISE_NAMES.get(state.exerciseId) || state.exerciseId;
+  const ex = db.exercise(state.exerciseId);
   const rows = db.exerciseHistory(state.exerciseId);
   main.innerHTML = `
-    <button class="back" id="back">‹ Back</button>
-    <h1 class="page-title">${esc(name)}</h1>
+    <button class="back" data-act="back">‹ Back</button>
+    <h1 class="page-title">${esc(ex.name)}</h1>
     ${rows.length ? `<section class="card">${rows.map((r) => `
       <div class="row"><span class="name">${esc(prettyDate(r.date, { month: "short", day: "numeric", year: "numeric" }))}</span>
       <span class="vals">${r.sets.map(setText).join(" · ")} ${esc(unit())}</span></div>`).join("")}</section>`
       : `<p class="empty">No sets logged yet.</p>`}`;
+}
+
+// ---------- routines list ----------
+
+function renderRoutines() {
+  const active = db.activeRoutineId();
+  const list = db.routines();
+  main.innerHTML = `
+    <h1 class="page-title">Routines</h1>
+    ${list.map((r) => {
+      const ds = db.days(r.id);
+      return `
+        <button class="card routine-card${r.id === active ? " active" : ""}" data-act="edit-routine" data-id="${esc(r.id)}">
+          <span class="rc-name">${esc(r.name)}${r.id === active ? `<span class="tag">ACTIVE</span>` : ""}</span>
+          <span class="rc-days">${ds.length} day${ds.length === 1 ? "" : "s"}${ds.length ? ` · ${esc(ds.map((d) => d.name).join(", "))}` : ""}</span>
+        </button>`;
+    }).join("")}
+    <button class="btn primary" data-act="new-routine">+ New routine</button>`;
+}
+
+// ---------- routine editor ----------
+
+function exerciseRowHtml(row, i, rows, letter) {
+  const ex = db.exercise(row.exercise_id);
+  const open = state.openRow === row.id;
+  const isLast = i === rows.length - 1;
+  const summary = `${row.sets} × ${rangeText(row.rep_lo, row.rep_hi)}${row.warmup ? " · warm-up" : ""}`;
+  return `
+    <div class="ed-row${open ? " open" : ""}" data-row="${esc(row.id)}">
+      <button class="ed-row-head" data-act="toggle-row" data-id="${esc(row.id)}">
+        <span class="ed-name">${esc(ex.name)}${letter ? `<span class="tag">SS ${letter}</span>` : ""}</span>
+        <span class="ed-sum">${summary} <span class="chev">${open ? "▾" : "▸"}</span></span>
+      </button>
+      ${open ? `
+      <div class="ed-body">
+        <div class="ed-line">
+          <span class="lbl">Sets</span>
+          <div class="stepper">
+            <button data-act="sets" data-id="${esc(row.id)}" data-d="-1" aria-label="Fewer sets">−</button>
+            <span>${row.sets}</span>
+            <button data-act="sets" data-id="${esc(row.id)}" data-d="1" aria-label="More sets">+</button>
+          </div>
+        </div>
+        <div class="ed-line">
+          <span class="lbl">Reps</span>
+          <div class="reps">
+            <input class="rep" data-field="rep_lo" data-id="${esc(row.id)}" type="text" inputmode="numeric" value="${row.rep_lo}" aria-label="Lowest reps">
+            <span>to</span>
+            <input class="rep" data-field="rep_hi" data-id="${esc(row.id)}" type="text" inputmode="numeric" value="${row.rep_hi}" aria-label="Highest reps">
+          </div>
+        </div>
+        <div class="ed-line toggles">
+          <button class="chip${row.warmup ? " on" : ""}" data-act="warmup" data-id="${esc(row.id)}">Warm-up sets</button>
+          ${isLast ? "" : `<button class="chip${row.superset_next ? " on" : ""}" data-act="superset" data-id="${esc(row.id)}">Superset with next</button>`}
+        </div>
+        <div class="ed-line actions">
+          <button class="mini" data-act="move-row" data-id="${esc(row.id)}" data-d="-1" ${i === 0 ? "disabled" : ""} aria-label="Move up">↑</button>
+          <button class="mini" data-act="move-row" data-id="${esc(row.id)}" data-d="1" ${isLast ? "disabled" : ""} aria-label="Move down">↓</button>
+          <button class="mini wide" data-act="swap" data-id="${esc(row.id)}">Swap</button>
+          <button class="mini wide danger" data-act="remove-row" data-id="${esc(row.id)}">Remove</button>
+        </div>
+      </div>` : ""}
+    </div>`;
+}
+
+function renderRoutine() {
+  const r = db.routine(state.routineId);
+  if (!r) return go("routines");
+  const isActive = db.activeRoutineId() === r.id;
+  const list = db.days(r.id);
+  const many = db.routines().length > 1;
+  main.innerHTML = `
+    <button class="back" data-act="routines">‹ Routines</button>
+    <div class="ed-top">
+      <input class="title-input" data-field="routine-name" value="${esc(r.name)}" placeholder="Routine name" aria-label="Routine name">
+      ${isActive ? `<span class="tag big">ACTIVE</span>` : `<button class="btn primary small" data-act="activate">Use this routine</button>`}
+    </div>
+    <label class="tempo-edit">Tempo <input data-field="routine-tempo" value="${esc(r.tempo || "")}" placeholder="optional, e.g. 3:1:2:1" aria-label="Tempo"></label>
+    ${list.map((d, i) => {
+      const rows = db.dayExercises(d.id);
+      const letters = supersetLetters(rows);
+      return `
+        <section class="card ed-day" data-day="${esc(d.id)}">
+          <div class="ed-day-head">
+            <span class="day-no">Day ${i + 1}</span>
+            <button class="mini" data-act="move-day" data-id="${esc(d.id)}" data-d="-1" ${i === 0 ? "disabled" : ""} aria-label="Move day up">↑</button>
+            <button class="mini" data-act="move-day" data-id="${esc(d.id)}" data-d="1" ${i === list.length - 1 ? "disabled" : ""} aria-label="Move day down">↓</button>
+            <button class="mini danger" data-act="delete-day" data-id="${esc(d.id)}" aria-label="Delete day">✕</button>
+          </div>
+          <input class="day-name" data-field="day-name" data-id="${esc(d.id)}" value="${esc(d.name)}" placeholder="Day name" aria-label="Day name">
+          <input class="day-sub" data-field="day-sub" data-id="${esc(d.id)}" value="${esc(d.subtitle || "")}" placeholder="Description (optional)" aria-label="Day description">
+          <div class="ed-rows">${rows.map((row, j) => exerciseRowHtml(row, j, rows, letters.get(row.id))).join("")}</div>
+          <button class="add-ex" data-act="add-ex" data-id="${esc(d.id)}">+ Add exercise</button>
+        </section>`;
+    }).join("")}
+    <button class="btn" data-act="add-day">+ Add day</button>
+    <div class="ed-footer">
+      <button class="btn" data-act="duplicate">Duplicate routine</button>
+      ${many ? `<button class="btn danger" data-act="delete-routine">Delete routine</button>` : ""}
+    </div>`;
+}
+
+// ---------- exercise picker ----------
+
+function pickerList() {
+  const q = state.pickerQuery.trim().toLowerCase();
+  const m = state.pickerMuscle;
+  const taken = new Set(db.dayExercises(state.picker.dayId).map((r) => r.exercise_id));
+  const swapping = state.picker.mode === "swap" ? db.dayExercises(state.picker.dayId).find((r) => r.id === state.picker.rowId) : null;
+  const all = [...db.customExercises(), ...CATALOG];
+  const items = all.filter((e) =>
+    (m === "All" || (m === "Custom" ? e.custom : e.muscle === m)) &&
+    (!q || e.name.toLowerCase().includes(q) || e.muscle.toLowerCase().includes(q) || (e.equipment || "").toLowerCase().includes(q))
+  );
+  const exact = all.some((e) => e.name.toLowerCase() === q);
+  let html = "";
+  if (q && !exact) {
+    html += `<button class="pick create" data-act="create-ex"><b>+ Create “${esc(state.pickerQuery.trim())}”</b><small>Custom exercise${m !== "All" && m !== "Custom" ? ` · ${esc(m)}` : ""}</small></button>`;
+  }
+  html += items.map((e) => {
+    const isTaken = taken.has(e.id) && !(swapping && swapping.exercise_id === e.id);
+    return `<button class="pick" data-act="pick" data-id="${esc(e.id)}" ${isTaken ? "disabled" : ""}>
+      <b>${esc(e.name)}</b><small>${esc(e.muscle)}${e.equipment ? ` · ${esc(e.equipment)}` : ""}${isTaken ? " · already in this day" : ""}</small></button>`;
+  }).join("");
+  if (!items.length && !q) html += `<p class="empty">No custom exercises yet. Type a name above to make one.</p>`;
+  return html;
+}
+
+function renderPicker() {
+  const p = state.picker;
+  const swapping = p.mode === "swap" ? db.exercise(db.dayExercises(p.dayId).find((r) => r.id === p.rowId)?.exercise_id) : null;
+  main.innerHTML = `
+    <button class="back" data-act="close-picker">‹ Cancel</button>
+    <h1 class="page-title">${swapping ? `Swap ${esc(swapping.name)}` : "Add exercise"}</h1>
+    <input id="picker-q" class="search" type="search" placeholder="Search or type a new exercise" value="${esc(state.pickerQuery)}" autocomplete="off" aria-label="Search exercises">
+    <div class="chips">
+      ${["All", ...MUSCLES, "Custom"].map((m) => `<button class="chip${state.pickerMuscle === m ? " on" : ""}" data-act="muscle" data-id="${m}">${m}</button>`).join("")}
+    </div>
+    <div id="pick-list">${pickerList()}</div>`;
+}
+
+async function choose(exerciseId) {
+  const p = state.picker;
+  if (p.mode === "swap") {
+    db.updateDayExercise(p.rowId, { exercise_id: exerciseId });
+    state.openRow = p.rowId;
+  } else {
+    state.openRow = db.addDayExercise(p.dayId, exerciseId);
+  }
+  state.picker = null;
+  go("routine");
+  await changed();
 }
 
 // ---------- settings ----------
@@ -278,23 +488,23 @@ function renderSettings() {
     dropbox = `<p class="err">No Dropbox app key yet. Add it to <code>js/config.js</code>.</p>`;
   } else if (dbx.isConnected()) {
     dropbox = `
-      <p>Connected. Your log is saved to <b>Apps / (this app's folder) / workouts.sqlite</b> in your Dropbox.</p>
-      <button class="btn" id="sync-now">Sync now</button>
-      <button class="btn danger" id="disconnect">Disconnect</button>`;
+      <p>Connected. Your log and routines are saved to <b>Apps / (this app's folder) / workouts.sqlite</b> in your Dropbox.</p>
+      <button class="btn" data-act="sync-now">Sync now</button>
+      <button class="btn danger" data-act="disconnect">Disconnect</button>`;
   } else if (dbx.isStandalone()) {
     dropbox = `
       <p>Connect once on each device. The app can only see its own folder in your Dropbox, nothing else.</p>
       <p>1. Tap Connect and approve in Dropbox. 2. Copy the code Dropbox shows. 3. Come back here and paste it.</p>
       <a class="btn primary" id="connect-manual" target="_blank" rel="noopener" style="text-decoration:none">Connect Dropbox</a>
-      <div class="set" style="grid-template-columns: 1fr auto; margin-top: 6px;">
+      <div class="code-row">
         <input id="dbx-code" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste code">
-        <button class="btn" id="dbx-code-go" style="margin:0">Done</button>
+        <button class="btn" data-act="dbx-code-go">Done</button>
       </div>
       <p class="err" id="dbx-code-err"></p>`;
   } else {
     dropbox = `
       <p>Connect once on each device. The app can only see its own folder in your Dropbox, nothing else.</p>
-      <button class="btn primary" id="connect">Connect Dropbox</button>`;
+      <button class="btn primary" data-act="connect">Connect Dropbox</button>`;
   }
   main.innerHTML = `
     <h1 class="page-title">Settings</h1>
@@ -306,30 +516,34 @@ function renderSettings() {
       <h3>Units</h3>
       <p>Old entries are converted for display.</p>
       <div class="seg">
-        <button data-unit="lb" class="${u === "lb" ? "active" : ""}">lb</button>
-        <button data-unit="kg" class="${u === "kg" ? "active" : ""}">kg</button>
+        <button data-act="unit" data-id="lb" class="${u === "lb" ? "active" : ""}">lb</button>
+        <button data-act="unit" data-id="kg" class="${u === "kg" ? "active" : ""}">kg</button>
       </div>
     </section>
     <section class="card setting">
       <h3>Backup</h3>
       <p>Download the SQLite file. ${db.setCount()} sets logged.</p>
-      <button class="btn" id="export">Download database</button>
+      <button class="btn" data-act="export">Download database</button>
     </section>`;
   prepareConnectLink();
 }
 
 // ---------- top-level render ----------
 
+const NAV_FOR = { exercise: null, routine: "routines", picker: "routines" };
+
 function render() {
   state.renderPending = false;
-  for (const b of document.querySelectorAll(".nav")) {
-    const v = state.view === "exercise" ? "history" : state.view;
-    b.classList.toggle("active", b.dataset.view === v);
-  }
+  const navView = state.view in NAV_FOR ? NAV_FOR[state.view] ?? state.backTo : state.view;
+  for (const b of document.querySelectorAll(".nav")) b.classList.toggle("active", b.dataset.view === navView);
   if (state.view === "workout") renderWorkout();
   else if (state.view === "history") renderHistory();
   else if (state.view === "exercise") renderExercise();
-  else renderSettings();
+  else if (state.view === "routines") renderRoutines();
+  else if (state.view === "routine") renderRoutine();
+  else if (state.view === "picker" && state.picker) renderPicker();
+  else if (state.view === "settings") renderSettings();
+  else { state.view = "workout"; renderWorkout(); }
   renderBanner();
 }
 
@@ -348,7 +562,7 @@ function renderBanner() {
 
 const STATUS_TEXT = {
   idle: "",
-  local: "On this device",
+  local: "On device",
   pending: "Saving…",
   syncing: "Syncing…",
   synced: "Saved",
@@ -376,65 +590,115 @@ sync.onPulled(() => {
   else render();
 });
 
-function pull() {
-  return sync.syncNow();
-}
+// ---------- actions ----------
 
-// ---------- events ----------
+const actions = {
+  "day": (id) => { state.dayId = id; render(); },
+  "ex-history": (id) => { state.backTo = state.view === "exercise" ? state.backTo : state.view; go("exercise", { exerciseId: id }); },
+  "back": () => go(state.backTo || "workout"),
+  "routines": () => go("routines"),
+  "add-set": (_, el) => {
+    const card = el.closest(".card");
+    const key = `${state.date}|${card.dataset.ex}`;
+    state.extraSets[key] = (state.extraSets[key] || 0) + 1;
+    rerenderCard(card.dataset.ex);
+    const rows = document.querySelectorAll(`#card-${CSS.escape(card.dataset.ex)} .set`);
+    rows[rows.length - 1]?.querySelector(".w")?.focus();
+  },
 
-document.querySelector(".top").addEventListener("click", (e) => {
-  const b = e.target.closest(".nav");
-  if (!b) return;
-  state.view = b.dataset.view;
-  render();
-  window.scrollTo(0, 0);
-});
+  // routines
+  "new-routine": async () => {
+    const id = db.createRoutine("New routine");
+    if (!db.activeRoutineId() || db.routines().length === 1) db.setActiveRoutine(id);
+    go("routine", { routineId: id, openRow: null });
+    const name = main.querySelector("[data-field='routine-name']");
+    name?.focus();
+    name?.select();
+    await changed();
+  },
+  "edit-routine": (id) => go("routine", { routineId: id, openRow: null }),
+  "activate": async () => {
+    db.setActiveRoutine(state.routineId);
+    state.dayId = null;
+    render();
+    await changed();
+  },
+  "duplicate": async () => {
+    const id = db.duplicateRoutine(state.routineId);
+    go("routine", { routineId: id, openRow: null });
+    await changed();
+  },
+  "delete-routine": async () => {
+    const r = db.routine(state.routineId);
+    if (!confirm(`Delete “${r.name}”? Your logged history stays.`)) return;
+    const wasActive = db.activeRoutineId() === r.id;
+    db.deleteRoutine(r.id);
+    if (wasActive) {
+      const next = db.routines()[0];
+      if (next) db.setActiveRoutine(next.id);
+      state.dayId = null;
+    }
+    go("routines");
+    await changed();
+  },
+  "add-day": async () => {
+    const n = db.days(state.routineId).length + 1;
+    const id = db.addDay(state.routineId, `Day ${n}`);
+    render();
+    const input = main.querySelector(`[data-field='day-name'][data-id='${CSS.escape(id)}']`);
+    input?.scrollIntoView({ block: "center" });
+    input?.focus();
+    input?.select();
+    await changed();
+  },
+  "move-day": async (id, el) => { db.moveDay(id, Number(el.dataset.d)); render(); await changed(); },
+  "delete-day": async (id) => {
+    const d = db.day(id);
+    if (!confirm(`Delete “${d.name}” from this routine? Your logged history stays.`)) return;
+    db.deleteDay(id);
+    if (state.dayId === id) state.dayId = null;
+    render();
+    await changed();
+  },
+  "toggle-row": (id) => { state.openRow = state.openRow === id ? null : id; render(); },
+  "sets": async (id, el) => {
+    const row = rowById(id);
+    db.updateDayExercise(id, { sets: Math.min(10, Math.max(1, row.sets + Number(el.dataset.d))) });
+    render();
+    await changed();
+  },
+  "warmup": async (id) => { db.updateDayExercise(id, { warmup: rowById(id).warmup ? 0 : 1 }); render(); await changed(); },
+  "superset": async (id) => { db.updateDayExercise(id, { superset_next: rowById(id).superset_next ? 0 : 1 }); render(); await changed(); },
+  "move-row": async (id, el) => { db.moveDayExercise(id, Number(el.dataset.d)); render(); await changed(); },
+  "remove-row": async (id) => {
+    const row = rowById(id);
+    if (!confirm(`Remove ${db.exercise(row.exercise_id).name} from this day? Its history stays.`)) return;
+    db.removeDayExercise(id);
+    state.openRow = null;
+    render();
+    await changed();
+  },
+  "add-ex": (dayId) => openPicker({ mode: "add", dayId }),
+  "swap": (rowId) => openPicker({ mode: "swap", dayId: rowById(rowId).day_id, rowId }),
 
-banner.addEventListener("click", (e) => {
-  const b = e.target.closest("[data-goto]");
-  if (!b) return;
-  state.view = b.dataset.goto;
-  render();
-});
+  // picker
+  "close-picker": () => { state.picker = null; go("routine"); },
+  "muscle": (m) => {
+    state.pickerMuscle = m;
+    for (const c of main.querySelectorAll(".chips .chip")) c.classList.toggle("on", c.dataset.id === m);
+    document.getElementById("pick-list").innerHTML = pickerList();
+  },
+  "pick": (id) => choose(id),
+  "create-ex": () => {
+    const m = state.pickerMuscle;
+    const id = db.createCustomExercise(state.pickerQuery, m !== "All" && m !== "Custom" ? m : null);
+    return choose(id);
+  },
 
-main.addEventListener("click", async (e) => {
-  const t = e.target;
-  const day = t.closest(".day");
-  if (day) {
-    state.dayId = day.dataset.day;
-    render();
-    return;
-  }
-  const check = t.closest(".check");
-  if (check) {
-    await toggleSet(check.closest(".set"));
-    return;
-  }
-  const name = t.closest(".ex-name");
-  if (name) {
-    state.exerciseId = name.dataset.ex;
-    state.view = "exercise";
-    render();
-    window.scrollTo(0, 0);
-    return;
-  }
-  if (t.id === "back") {
-    state.view = "workout";
-    render();
-    return;
-  }
-  const u = t.closest("[data-unit]");
-  if (u) {
-    db.setSetting("unit", u.dataset.unit);
-    render();
-    await sync.changed();
-    return;
-  }
-  if (t.id === "connect") {
-    await dbx.startConnect();
-    return;
-  }
-  if (t.id === "dbx-code-go") {
+  // settings
+  "unit": async (u) => { db.setSetting("unit", u); render(); await changed(); },
+  "connect": () => dbx.startConnect(),
+  "dbx-code-go": async () => {
     const input = document.getElementById("dbx-code");
     const err = document.getElementById("dbx-code-err");
     if (!input.value.trim()) { input.focus(); return; }
@@ -442,29 +706,23 @@ main.addEventListener("click", async (e) => {
       await dbx.finishManualConnect(input.value);
       sync.forgetRemote();
       bannerMessage = "Connected to Dropbox.";
-      state.view = "workout";
-      render();
+      go("workout");
       if (await sync.syncNow()) {
         state.dayId = defaultDay();
         render();
       }
-    } catch (e2) {
-      err.textContent = e2.message;
+    } catch (e) {
+      err.textContent = e.message;
     }
-    return;
-  }
-  if (t.id === "disconnect") {
+  },
+  "disconnect": async () => {
     if (!confirm("Disconnect Dropbox on this device? Your data stays in Dropbox and on this device.")) return;
     await dbx.disconnect();
     sync.forgetRemote();
     render();
-    return;
-  }
-  if (t.id === "sync-now") {
-    await pull();
-    return;
-  }
-  if (t.id === "export") {
+  },
+  "sync-now": () => sync.syncNow(),
+  "export": () => {
     const blob = new Blob([db.exportBytes()], { type: "application/x-sqlite3" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -473,8 +731,84 @@ main.addEventListener("click", async (e) => {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  },
+};
+
+function rowById(id) {
+  for (const d of db.days(state.routineId)) {
+    const r = db.dayExercises(d.id).find((x) => x.id === id);
+    if (r) return r;
   }
+  throw new Error(`Row ${id} not found`);
+}
+
+function openPicker(picker) {
+  state.picker = picker;
+  state.pickerQuery = "";
+  state.pickerMuscle = "All";
+  go("picker");
+}
+
+// ---------- events ----------
+
+document.querySelector(".top").addEventListener("click", (e) => {
+  const b = e.target.closest(".nav");
+  if (!b) return;
+  state.picker = null;
+  go(b.dataset.view);
 });
+
+banner.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-goto]");
+  if (b) go(b.dataset.goto);
+});
+
+main.addEventListener("click", async (e) => {
+  const check = e.target.closest(".check");
+  if (check) {
+    await toggleSet(check.closest(".set"));
+    return;
+  }
+  const el = e.target.closest("[data-act]");
+  if (!el || el.disabled) return;
+  const fn = actions[el.dataset.act];
+  if (fn) await fn(el.dataset.id, el);
+});
+
+// Text fields in the editor save on change without redrawing, so moving
+// from one box to the next never loses focus.
+async function saveField(t) {
+  const f = t.dataset.field;
+  const v = t.value.trim();
+  if (f === "routine-name") {
+    if (!v) { t.value = db.routine(state.routineId).name; return; }
+    db.updateRoutine(state.routineId, { name: v });
+  } else if (f === "routine-tempo") {
+    db.updateRoutine(state.routineId, { tempo: v || null });
+  } else if (f === "day-name") {
+    if (!v) { t.value = db.day(t.dataset.id).name; return; }
+    db.updateDay(t.dataset.id, { name: v });
+  } else if (f === "day-sub") {
+    db.updateDay(t.dataset.id, { subtitle: v || null });
+  } else if (f === "rep_lo" || f === "rep_hi") {
+    const row = rowById(t.dataset.id);
+    const n = /^\d+$/.test(v) ? Math.min(100, Math.max(1, Number(v))) : null;
+    if (n === null) { t.value = row[f]; return; }
+    let lo = f === "rep_lo" ? n : row.rep_lo;
+    let hi = f === "rep_hi" ? n : row.rep_hi;
+    // Keep the range valid by moving the other end, not by swapping.
+    if (lo > hi) { if (f === "rep_lo") hi = lo; else lo = hi; }
+    db.updateDayExercise(row.id, { rep_lo: lo, rep_hi: hi });
+    const box = t.closest(".ed-row");
+    box.querySelector("[data-field='rep_lo']").value = lo;
+    box.querySelector("[data-field='rep_hi']").value = hi;
+    const r2 = rowById(row.id);
+    box.querySelector(".ed-sum").firstChild.textContent = `${r2.sets} × ${rangeText(lo, hi)}${r2.warmup ? " · warm-up" : ""} `;
+  } else {
+    return;
+  }
+  await changed();
+}
 
 main.addEventListener("change", async (e) => {
   const t = e.target;
@@ -486,22 +820,36 @@ main.addEventListener("change", async (e) => {
     render();
     return;
   }
+  if (t.dataset.field) {
+    await saveField(t);
+    return;
+  }
   const row = t.closest(".set");
   if (row && row.classList.contains("logged")) await editLoggedSet(row);
 });
 
-// Enter in the weight box jumps to reps; Enter in reps logs the set.
-main.addEventListener("keydown", async (e) => {
-  if (e.key !== "Enter") return;
-  const row = e.target.closest(".set");
-  if (!row) return;
-  e.preventDefault();
-  if (e.target.classList.contains("w")) row.querySelector(".r").focus();
-  else if (!row.classList.contains("logged")) await toggleSet(row);
-  else e.target.blur();
+main.addEventListener("input", (e) => {
+  e.target.classList.remove("missing");
+  if (e.target.id === "picker-q") {
+    state.pickerQuery = e.target.value;
+    document.getElementById("pick-list").innerHTML = pickerList();
+  }
 });
 
-main.addEventListener("input", (e) => e.target.classList.remove("missing"));
+// Enter: weight → reps → log the set. In other fields, Enter just closes the keyboard.
+main.addEventListener("keydown", async (e) => {
+  if (e.key !== "Enter") return;
+  const t = e.target;
+  const row = t.closest(".set");
+  if (!row) {
+    if (t.tagName === "INPUT" && t.id !== "picker-q") t.blur();
+    return;
+  }
+  e.preventDefault();
+  if (t.classList.contains("w")) row.querySelector(".r").focus();
+  else if (!row.classList.contains("logged")) await toggleSet(row);
+  else t.blur();
+});
 
 main.addEventListener("focusout", () => {
   setTimeout(() => {
@@ -516,10 +864,10 @@ document.addEventListener("visibilitychange", () => {
     state.dayId = defaultDay();
     if (!inputFocused()) render();
   }
-  pull();
+  sync.syncNow();
 });
 
-window.addEventListener("online", () => pull());
+window.addEventListener("online", () => sync.syncNow());
 
 // ---------- start ----------
 
@@ -545,7 +893,7 @@ async function start() {
   state.dayId = defaultDay();
   render();
 
-  // First sync. On a new device this brings down existing history,
+  // First sync. On a new device this brings down existing history and routines,
   // so pick the day again once it arrives.
   if (await sync.syncNow()) {
     state.dayId = defaultDay();

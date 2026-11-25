@@ -1,11 +1,14 @@
 # Workout Tracker
 
-A one-page tracker for the UpOne Coaching 4-day plan. It runs on GitHub Pages and stores every set in a SQLite file in your own Dropbox.
+A one-page workout tracker. It runs on GitHub Pages and stores your routines and every set in a SQLite file in your own Dropbox. New users start with the UpOne Coaching 4-day plan and can edit it or build their own.
 
 - Pick the day, type weight × reps, tap the circle. A blank box logs the gray number in it (last time's weight and reps).
 - Each exercise shows last session's numbers, a warm-up suggestion for the main lifts, and an "Add weight" flag once you hit the top of the rep range on every set.
 - Every tap is saved on the device right away, then to Dropbox a moment later. It works offline and catches up when you're back online.
-- Two devices can edit at once. Changes merge set by set; the newer edit wins.
+- Tap **+ Set** to log more sets than the plan calls for.
+- **Routines**: keep as many as you like and switch which one is active. Add, rename, reorder or delete days. Add exercises from a built-in catalog of about 100 (search or filter by muscle), or type a name to create your own. Swap an exercise, change sets and rep range, toggle warm-up sets, and pair exercises into supersets.
+- History follows the exercise, not the routine slot. Swap an exercise out and back in later and its history is still there.
+- Two devices can edit at once. Changes merge row by row; the newer edit wins.
 
 ## Setup
 
@@ -35,8 +38,9 @@ Open the site, go to **Settings → Connect Dropbox**, and approve.
 ## Files
 | Path | What |
 |---|---|
-| `js/plan.js` | The workout plan. Edit exercises, sets and rep ranges here. Keep `id`s stable; history is keyed on them. |
-| `js/db.js` | SQLite schema, queries, and the row-level merge. |
+| `js/plan.js` | The starter routine new users get. |
+| `js/catalog.js` | Built-in exercise catalog with form cues. Never change an existing `id`; logged sets point at them. |
+| `js/db.js` | SQLite schema (sets, routines, days, exercises), queries, and the row-level merge. |
 | `js/sync.js` | Local save + Dropbox sync with revision checks. |
 | `js/dropbox.js` | Dropbox OAuth (PKCE) and file API. |
 | `js/app.js` | The UI. |
