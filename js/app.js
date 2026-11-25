@@ -2,6 +2,7 @@ import { CATALOG, MUSCLES } from "./catalog.js";
 import * as db from "./db.js";
 import * as dbx from "./dropbox.js";
 import * as sync from "./sync.js";
+import { APP_VERSION } from "./version.js";
 
 // ---------- state ----------
 
@@ -703,7 +704,8 @@ function renderSettings() {
       <h3>Backup</h3>
       <p>Download the SQLite file. ${db.setCount()} sets logged.</p>
       <button class="btn" data-act="export">Download database</button>
-    </section>`;
+    </section>
+    <p class="version">Version ${APP_VERSION}</p>`;
   prepareConnectLink();
 }
 
@@ -1165,6 +1167,43 @@ document.addEventListener("visibilitychange", () => {
 
 window.addEventListener("online", () => sync.syncNow());
 
+// ---------- updates ----------
+
+// Ask for the newest service worker on every open (never from the browser's
+// cache), and when an update takes over, reload once so the whole app is the
+// new version. Never reload under someone's fingers: wait until they leave the box.
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  // Once a version is in control, any change of control is an update.
+  // (The very first install also fires controllerchange; that one isn't.)
+  let controlled = Boolean(navigator.serviceWorker.controller);
+  let reloading = false;
+
+  const reloadWhenIdle = () => {
+    if (reloading) return;
+    if (inputFocused()) {
+      main.addEventListener("focusout", () => setTimeout(reloadWhenIdle, 300), { once: true });
+      return;
+    }
+    reloading = true;
+    window.location.reload();
+  };
+
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (controlled) reloadWhenIdle();
+    controlled = true;
+  });
+
+  navigator.serviceWorker.register("sw.js", { updateViaCache: "none" })
+    .then((reg) => {
+      reg.update().catch(() => {});
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") reg.update().catch(() => {});
+      });
+    })
+    .catch((e) => console.warn("Service worker not registered", e));
+}
+
 // ---------- start ----------
 
 async function start() {
@@ -1198,9 +1237,7 @@ async function start() {
     else render();
   }
 
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js").catch((e) => console.warn("Service worker not registered", e));
-  }
+  registerServiceWorker();
 }
 
 start();

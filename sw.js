@@ -2,7 +2,10 @@
 // online, and the app still opens in a gym basement with no signal.
 // Only this site's own files are cached; Dropbox calls pass straight through.
 
-const CACHE = "workout-tracker-v8";
+// Bump APP_VERSION here and in js/version.js on every release: a changed
+// sw.js is what tells browsers an update exists.
+const APP_VERSION = "9";
+const CACHE = `workout-tracker-v${APP_VERSION}`;
 
 self.addEventListener("install", () => self.skipWaiting());
 

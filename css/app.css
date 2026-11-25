@@ -691,3 +691,5 @@ input:focus { outline: none; border-color: var(--accent) !important; }
 .swatch { display: flex; flex: none; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); }
 .swatch i { display: block; width: 10px; height: 26px; }
 .theme small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+
+.version { text-align: center; color: var(--muted); font-size: 12px; margin: 4px 0 20px; }
