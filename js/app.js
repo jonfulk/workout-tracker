@@ -9,7 +9,11 @@ const state = {
   view: "workout",      // workout | history | exercise | routines | routine | picker | settings
   dayId: null,
   date: today(),
-  dateMode: "today",    // today | viewing (a day completed earlier this week) | manual (picked a date)
+  // anchor: the date you're working from (today, or one you picked). The day
+  // buttons show that date's week. date: what's on screen, which is the anchor,
+  // or the date you completed a day when you tap a finished day in that week.
+  anchor: today(),
+  followToday: true,    // anchor tracks today, even past midnight
   exerciseId: null,     // exercise history view
   routineId: null,      // routine editor
   openRow: null,        // expanded exercise row in the editor
@@ -80,15 +84,20 @@ function weekday(iso) {
   return new Date(y, m - 1, d).getDay();
 }
 
-// Days of the active routine completed this week (since the chosen first day
-// of the week, through today): Map dayId -> most recent date it was completed.
-function doneThisWeek() {
-  const t = today();
+// Days completed in the week containing `date` (week starts on the day set in
+// Settings; never past today): Map dayId -> date it was completed, newest first.
+function doneInWeek(date) {
   const start = Number(db.getSetting("week_start", "1"));
-  const from = addDays(t, -((weekday(t) - start + 7) % 7));
+  const from = addDays(date, -((weekday(date) - start + 7) % 7));
+  let to = addDays(from, 6);
+  if (to > today()) to = today();
   const out = new Map();
-  for (const c of db.completionsBetween(from, t)) if (!out.has(c.dayId)) out.set(c.dayId, c.date);
+  for (const c of db.completionsBetween(from, to)) if (!out.has(c.dayId)) out.set(c.dayId, c.date);
   return out;
+}
+
+function shortDate(iso) {
+  return iso === today() ? "today" : prettyDate(iso);
 }
 
 function inputFocused() {
@@ -137,8 +146,8 @@ function defaultDay() {
   // Using "Complete workout": the next day this week that isn't done yet,
   // counting on from the one you finished most recently.
   if (state.date === today() && db.hasAnyCompletions()) {
-    const done = doneThisWeek();
-    // doneThisWeek is ordered newest first (by date, then by when you tapped Complete).
+    const done = doneInWeek(today());
+    // doneInWeek is ordered newest first (by date, then by when you tapped Complete).
     const latest = [...done.entries()].find(([id]) => ids.includes(id));
     if (!latest) return ids[0];
     const i = ids.indexOf(latest[0]);
@@ -257,14 +266,13 @@ function renderWorkout() {
   const day = list.find((d) => d.id === state.dayId);
   const rows = db.dayExercises(day.id);
   const letters = supersetLetters(rows);
-  const isToday = state.date === today();
-  const done = doneThisWeek();
+  const done = doneInWeek(state.anchor);
   const completed = db.isComplete(state.date, day.id);
 
   let dateNote = "";
-  if (state.dateMode === "viewing") {
-    dateNote = `<div class="viewing"><span><b>✓ Completed</b> ${esc(prettyDate(state.date))}</span><button data-act="to-today">Back to today</button></div>`;
-  } else if (!isToday) {
+  if (state.date !== state.anchor) {
+    dateNote = `<div class="viewing"><span><b>✓ Completed</b> ${esc(prettyDate(state.date))}</span><button data-act="to-anchor">Back to ${esc(shortDate(state.anchor))}</button></div>`;
+  } else if (state.anchor !== today()) {
     dateNote = `<p class="tempo"><b>Editing ${esc(prettyDate(state.date))}.</b> <button class="linkish" data-act="to-today">Back to today</button></p>`;
   }
 
@@ -826,24 +834,20 @@ sync.onPulled(() => {
 
 const actions = {
   "day": (id) => {
-    // Picked a date yourself? Stay on it. Otherwise a day finished earlier this
-    // week opens what you did that day, and any other day opens today.
-    if (state.dateMode !== "manual") {
-      const doneOn = doneThisWeek().get(id);
-      if (doneOn && doneOn !== today()) {
-        state.date = doneOn;
-        state.dateMode = "viewing";
-      } else {
-        state.date = today();
-        state.dateMode = "today";
-      }
-    }
+    // A day finished in the week you're looking at opens the date you finished
+    // it. Any other day opens on the date you're working from.
     state.dayId = id;
+    state.date = doneInWeek(state.anchor).get(id) || state.anchor;
+    render();
+  },
+  "to-anchor": () => {
+    state.date = state.anchor;
     render();
   },
   "to-today": () => {
-    state.date = today();
-    state.dateMode = "today";
+    state.anchor = state.date = today();
+    state.followToday = true;
+    state.dayId = defaultDay();
     render();
   },
   "complete": async () => {
@@ -854,7 +858,11 @@ const actions = {
   },
   "uncomplete": async () => {
     db.setComplete(state.date, state.dayId, null, false);
-    if (state.dateMode === "viewing") state.dateMode = "manual";
+    // Un-completing a day you were viewing: keep working on that date.
+    if (state.date !== state.anchor) {
+      state.anchor = state.date;
+      state.followToday = state.anchor === today();
+    }
     render();
     await changed();
   },
@@ -1092,9 +1100,13 @@ main.addEventListener("change", async (e) => {
   const t = e.target;
   if (t.id === "date") {
     if (!t.value) return;
-    state.date = t.value > today() ? today() : t.value;
-    state.dateMode = state.date === today() ? "today" : "manual";
-    state.dayId = defaultDay();
+    state.anchor = state.date = t.value > today() ? today() : t.value;
+    state.followToday = state.anchor === today();
+    // Show what you did on that date if anything; otherwise keep the day you're on.
+    const ids = activeDays().map((d) => d.id);
+    const onDate = db.daysLoggedOn(state.date).find((id) => ids.includes(id))
+      || ids.find((id) => db.isComplete(state.date, id));
+    state.dayId = onDate || (state.followToday ? defaultDay() : state.dayId);
     render();
     return;
   }
@@ -1139,8 +1151,8 @@ main.addEventListener("focusout", () => {
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
-  if (state.dateMode === "today" && state.date !== today()) {
-    state.date = today();
+  if (state.followToday && state.anchor !== today()) {
+    state.anchor = state.date = today();
     state.dayId = defaultDay();
     if (!inputFocused()) render();
   }
