@@ -2,7 +2,7 @@
 // online, and the app still opens in a gym basement with no signal.
 // Only this site's own files are cached; Dropbox calls pass straight through.
 
-const CACHE = "workout-tracker-v3";
+const CACHE = "workout-tracker-v4";
 
 self.addEventListener("install", () => self.skipWaiting());
 

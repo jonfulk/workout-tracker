@@ -61,24 +61,44 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .sync {
   margin-left: auto;
-  font-size: 13px;
-  color: var(--muted);
-  white-space: nowrap;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  display: grid;
+  place-items: center;
 }
 .sync::before {
   content: "";
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 6px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: var(--muted);
-  vertical-align: 1px;
 }
 .sync.synced::before { background: var(--good); }
-.sync.pending::before, .sync.syncing::before { background: var(--warn); }
-.sync.offline::before, .sync.local::before { background: var(--muted); }
+.sync.pending::before, .sync.syncing::before { background: var(--warn); animation: pulse 1s ease-in-out infinite alternate; }
+.sync.offline::before, .sync.local::before, .sync.idle::before { background: var(--muted); }
 .sync.error::before { background: var(--bad); }
+@keyframes pulse { from { opacity: 1; } to { opacity: 0.35; } }
+
+.sync-pop {
+  position: fixed;
+  z-index: 10;
+  top: calc(58px + env(safe-area-inset-top));
+  right: 10px;
+  width: min(300px, calc(100vw - 20px));
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: #23262b;
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  font-size: 14px;
+}
+.sync-pop p { margin: 0 0 10px; }
+.sync-pop ul { list-style: none; margin: 0; padding: 10px 0 0; border-top: 1px solid var(--line); color: var(--muted); }
+.sync-pop li { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.sync-pop li::before { content: ""; width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--dot); }
 
 .banner {
   margin: 12px;

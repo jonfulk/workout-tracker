@@ -620,20 +620,55 @@ function renderBanner() {
   banner.hidden = !html;
 }
 
-const STATUS_TEXT = {
-  idle: "",
-  local: "On device",
-  pending: "Saving…",
-  syncing: "Syncing…",
-  synced: "Saved",
-  offline: "Offline",
-  error: "Sync error",
-};
+// The top-right dot shows sync state; tapping it explains what it means.
+const syncPop = document.getElementById("sync-pop");
+let syncState = { status: "idle", message: "" };
 
-sync.onStatus(({ status, message }) => {
+function statusSentence({ status, message }) {
+  switch (status) {
+    case "synced": return "Everything is backed up to Dropbox.";
+    case "pending": return "Saving your latest change to Dropbox…";
+    case "syncing": return "Syncing with Dropbox…";
+    case "offline": return "You're offline. Changes are kept on this device and go to Dropbox when you're back online.";
+    case "error": return message || "Something went wrong syncing with Dropbox. Your changes are kept on this device.";
+    default:
+      return dbx.isConnected()
+        ? "Connected to Dropbox."
+        : "Saved on this device only. Connect Dropbox in Settings to back it up and use it on other devices.";
+  }
+}
+
+function renderSyncPop() {
+  syncPop.innerHTML = `
+    <p>${esc(statusSentence(syncState))}</p>
+    <ul>
+      <li style="--dot: var(--good)">Backed up to Dropbox</li>
+      <li style="--dot: var(--warn)">Saving</li>
+      <li style="--dot: var(--muted)">On this device only, or offline</li>
+      <li style="--dot: var(--bad)">Problem syncing</li>
+    </ul>`;
+}
+
+function toggleSyncPop(open = syncPop.hidden) {
+  syncPop.hidden = !open;
+  syncEl.setAttribute("aria-expanded", String(open));
+  if (open) renderSyncPop();
+}
+
+syncEl.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleSyncPop();
+});
+document.addEventListener("click", (e) => {
+  if (!syncPop.hidden && !syncPop.contains(e.target)) toggleSyncPop(false);
+});
+
+sync.onStatus((st) => {
+  syncState = st;
+  const { status, message } = st;
   syncEl.className = `sync ${status}`;
-  syncEl.textContent = STATUS_TEXT[status] ?? "";
-  syncEl.title = message || STATUS_TEXT[status] || "";
+  syncEl.setAttribute("aria-label", `Sync status: ${statusSentence(st)}`);
+  if (!syncPop.hidden) renderSyncPop();
   if (status === "error" && message) {
     bannerMessage = message;
     renderBanner();
