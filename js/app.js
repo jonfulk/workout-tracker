@@ -151,15 +151,20 @@ function cardHtml(row, letter) {
       })
     : null;
 
+  // Each set starts as a copy of the set above it (logged or suggested);
+  // set 1 starts at last session's top set. A blank box logs its placeholder.
+  let aboveW = top ? fmt(toUnit(top.weight, top.unit)) : unit();
+  let aboveR = top ? String(top.reps) : rangeText(row.rep_lo, row.rep_hi);
+
   let rows = "";
   for (let n = 1; n <= count; n++) {
     const s = logged[n];
-    // Placeholders: the set you just did today, else last session's top set.
-    // A blank box logs its placeholder.
-    const earlier = logged[n - 1];
-    const src = earlier || top;
-    const phW = src ? fmt(toUnit(src.weight, src.unit)) : unit();
-    const phR = src ? src.reps : rangeText(row.rep_lo, row.rep_hi);
+    const phW = aboveW;
+    const phR = aboveR;
+    if (s) {
+      aboveW = fmt(toUnit(s.weight, s.unit));
+      aboveR = String(s.reps);
+    }
     const bonus = n > row.sets ? `<span class="optional">extra</span>` : "";
     rows += `
       <div class="set${s ? " logged" : ""}" data-set="${n}">
@@ -232,6 +237,30 @@ function renderWorkout() {
     ${rows.length ? rows.map((row) => cardHtml(row, letters.get(row.id))).join("")
       : `<p class="empty">No exercises on this day. <button class="linkish" data-act="edit-routine" data-id="${esc(rid)}">Add some</button>.</p>`}
   `;
+}
+
+// As you type in a set, the sets below it that you haven't filled in or logged
+// follow along. Sets above never change.
+function cascadePlaceholders(fromRow) {
+  let w = fromRow.querySelector(".w");
+  let r = fromRow.querySelector(".r");
+  let wVal = w.value.trim() || w.placeholder;
+  let rVal = r.value.trim() || r.placeholder;
+  let next = fromRow.nextElementSibling;
+  while (next && next.classList.contains("set")) {
+    const nw = next.querySelector(".w");
+    const nr = next.querySelector(".r");
+    if (next.classList.contains("logged")) {
+      wVal = nw.value.trim() || nw.placeholder;
+      rVal = nr.value.trim() || nr.placeholder;
+    } else {
+      nw.placeholder = wVal;
+      nr.placeholder = rVal;
+      wVal = nw.value.trim() || wVal;
+      rVal = nr.value.trim() || rVal;
+    }
+    next = next.nextElementSibling;
+  }
 }
 
 function rerenderCard(exId) {
@@ -940,6 +969,8 @@ main.addEventListener("change", async (e) => {
 
 main.addEventListener("input", (e) => {
   e.target.classList.remove("missing");
+  const setRow = e.target.closest(".set");
+  if (setRow) cascadePlaceholders(setRow);
   if (e.target.id === "picker-q") {
     state.pickerQuery = e.target.value;
     document.getElementById("pick-list").innerHTML = pickerList();
