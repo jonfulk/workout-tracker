@@ -51,7 +51,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 
 .nav.active { color: var(--text); background: var(--card); }
-.nav.gear { font-size: 19px; padding: 6px 10px; }
+.nav.gear { padding: 6px 9px; line-height: 0; }
+.nav.gear svg { display: block; width: 24px; height: 24px; }
+
+.steps { margin: 0 0 10px; padding-left: 22px; color: var(--muted); font-size: 14px; }
+.steps li { margin-bottom: 6px; }
+.steps b { color: var(--text); }
+.ico { display: inline-block; vertical-align: -3px; width: 17px; height: 17px; color: var(--accent); }
 
 .sync {
   margin-left: auto;

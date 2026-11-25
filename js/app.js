@@ -481,6 +481,65 @@ async function prepareConnectLink() {
   if (document.body.contains(a)) a.href = url;
 }
 
+// ---------- home screen install help ----------
+
+let installPrompt = null; // Android/Chrome one-tap install, when the browser offers it
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  if (state.view === "settings" && !inputFocused()) render();
+});
+window.addEventListener("appinstalled", () => {
+  installPrompt = null;
+  if (state.view === "settings") render();
+});
+
+function platform() {
+  const ua = navigator.userAgent;
+  // iPadOS reports itself as a Mac; touch support gives it away.
+  if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return "ios";
+  if (/Android/.test(ua)) return "android";
+  return "other";
+}
+
+const SHARE_ICON = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg>`;
+
+function installCard() {
+  if (dbx.isStandalone()) return "";
+  const p = platform();
+  const reconnect = dbx.isConnected()
+    ? `<p>The Home Screen app keeps its own storage, so connect Dropbox once more inside it. Your data is already in Dropbox and comes right back.</p>`
+    : "";
+  if (p === "ios") {
+    return `
+      <section class="card setting" id="install-card">
+        <h3>Add to Home Screen</h3>
+        <p>Opens full screen like a regular app, with no browser bars.</p>
+        <ol class="steps">
+          <li>In Safari, tap the <b>Share</b> button ${SHARE_ICON}. If you don't see it, tap <b>•••</b> first, then <b>Share</b>.</li>
+          <li>Scroll down and tap <b>Add to Home Screen</b>.</li>
+          <li>Tap <b>Add</b>, then open <b>Workout</b> from your Home Screen.</li>
+        </ol>
+        ${reconnect}
+      </section>`;
+  }
+  if (p === "android") {
+    return `
+      <section class="card setting" id="install-card">
+        <h3>Add to Home Screen</h3>
+        <p>Opens full screen like a regular app, with no browser bars.</p>
+        ${installPrompt ? `<button class="btn primary" data-act="install">Install app</button>` : `
+        <ol class="steps">
+          <li>In Chrome, tap the <b>⋮</b> menu at the top right.</li>
+          <li>Tap <b>Add to Home screen</b> (it may say <b>Install app</b>).</li>
+          <li>Tap <b>Install</b> or <b>Add</b>, then open <b>Workout</b> from your Home screen.</li>
+        </ol>`}
+        ${reconnect}
+      </section>`;
+  }
+  return "";
+}
+
 function renderSettings() {
   const u = unit();
   let dropbox;
@@ -508,6 +567,7 @@ function renderSettings() {
   }
   main.innerHTML = `
     <h1 class="page-title">Settings</h1>
+    ${installCard()}
     <section class="card setting">
       <h3>Dropbox</h3>
       ${dropbox}
@@ -696,6 +756,13 @@ const actions = {
   },
 
   // settings
+  "install": async () => {
+    if (!installPrompt) return;
+    const p = installPrompt;
+    installPrompt = null;
+    await p.prompt();
+    render();
+  },
   "unit": async (u) => { db.setSetting("unit", u); render(); await changed(); },
   "connect": () => dbx.startConnect(),
   "dbx-code-go": async () => {
