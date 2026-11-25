@@ -1,16 +1,95 @@
-:root {
+:root, [data-theme="gold"] {
   --bg: #111214;
   --card: #1b1d21;
   --line: #2c2f35;
   --text: #ecedef;
   --muted: #9a9ea6;
+  --placeholder: #5f636b;
   --accent: #c9b26b;
+  --accent-ink: #17140b;
+  --accent-soft: #26231a;
   --good: #4fb477;
   --good-bg: #17301f;
+  --good-line: #2f5a3d;
+  --good-ink: #0b1a10;
   --warn: #e0a84a;
   --bad: #e06464;
+  --banner-bg: #2a2417;
+  --banner-text: #f0d9a0;
+  --pop-bg: #23262b;
+  --header-bg: rgba(17, 18, 20, 0.96);
+  --shadow: rgba(0, 0, 0, 0.5);
   --radius: 12px;
   color-scheme: dark;
+}
+
+[data-theme="ocean"] {
+  --bg: #0e1319;
+  --card: #161d26;
+  --line: #263241;
+  --text: #e8eef5;
+  --muted: #93a1b2;
+  --placeholder: #56657a;
+  --accent: #5aa9e6;
+  --accent-ink: #06121d;
+  --accent-soft: #152637;
+  --good: #4fb477;
+  --good-bg: #13291d;
+  --good-line: #2a5238;
+  --good-ink: #0b1a10;
+  --banner-bg: #14263a;
+  --banner-text: #bcdcf5;
+  --pop-bg: #1c2530;
+  --header-bg: rgba(14, 19, 25, 0.96);
+}
+
+[data-theme="light"] {
+  --bg: #f4f4f1;
+  --card: #ffffff;
+  --line: #dcdcd6;
+  --text: #1b1c1e;
+  --muted: #64676d;
+  --placeholder: #a5a8ad;
+  --accent: #8a6d1f;
+  --accent-ink: #ffffff;
+  --accent-soft: #f4ecd6;
+  --good: #23864a;
+  --good-bg: #e3f3e8;
+  --good-line: #9fd0b0;
+  --good-ink: #ffffff;
+  --warn: #b7791f;
+  --bad: #c53030;
+  --banner-bg: #f6edd3;
+  --banner-text: #5c4810;
+  --pop-bg: #ffffff;
+  --header-bg: rgba(244, 244, 241, 0.96);
+  --shadow: rgba(0, 0, 0, 0.15);
+  color-scheme: light;
+}
+
+/* Okabe–Ito colors: blue for done, orange for accent, yellow for saving,
+   vermillion for problems. Distinguishable with every common type of color
+   blindness, and done/logged states also carry a ✓ so color is never the only cue. */
+[data-theme="colorblind"] {
+  --bg: #111214;
+  --card: #1b1d21;
+  --line: #2f3238;
+  --text: #f0f0f0;
+  --muted: #a3a6ad;
+  --placeholder: #63666d;
+  --accent: #e69f00;
+  --accent-ink: #1a1200;
+  --accent-soft: #2b2310;
+  --good: #56b4e9;
+  --good-bg: #10283a;
+  --good-line: #2b6a92;
+  --good-ink: #061520;
+  --warn: #f0e442;
+  --bad: #d55e00;
+  --banner-bg: #2b2310;
+  --banner-text: #f5d58a;
+  --pop-bg: #23262b;
+  --header-bg: rgba(17, 18, 20, 0.96);
 }
 
 * { box-sizing: border-box; }
@@ -37,7 +116,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   align-items: center;
   gap: 4px;
   padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
-  background: rgba(17, 18, 20, 0.96);
+  background: var(--header-bg);
   border-bottom: 1px solid var(--line);
 }
 
@@ -90,9 +169,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   width: min(300px, calc(100vw - 20px));
   padding: 12px 14px;
   border-radius: var(--radius);
-  background: #23262b;
+  background: var(--pop-bg);
   border: 1px solid var(--line);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 24px var(--shadow);
   font-size: 14px;
 }
 .sync-pop p { margin: 0 0 10px; }
@@ -104,8 +183,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
   margin: 12px;
   padding: 10px 12px;
   border-radius: var(--radius);
-  background: #2a2417;
-  color: #f0d9a0;
+  background: var(--banner-bg);
+  color: var(--banner-text);
   font-size: 14px;
 }
 .banner button {
@@ -139,7 +218,7 @@ main { max-width: 640px; margin: 0 auto; padding: 0 12px; }
 }
 .day small { display: block; font-size: 11px; color: var(--muted); }
 .day b { font-size: 15px; }
-.day.active { border-color: var(--accent); background: #26231a; }
+.day.active { border-color: var(--accent); background: var(--accent-soft); }
 .day.active small { color: var(--accent); }
 
 .dateline {
@@ -174,7 +253,7 @@ input[type="date"] {
   padding: 12px;
   margin-bottom: 12px;
 }
-.card.done { border-color: #2f5a3d; }
+.card.done { border-color: var(--good-line); }
 
 .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .card-head h2 { font-size: 17px; margin: 0; }
@@ -231,7 +310,7 @@ details p { margin: 6px 0 0; }
   border-radius: 8px;
   padding: 9px 4px;
 }
-.set input::placeholder { color: #5f636b; }
+.set input::placeholder { color: var(--placeholder); }
 .set input:focus { outline: none; border-color: var(--accent); }
 .set input.missing { border-color: var(--bad); }
 
@@ -245,8 +324,8 @@ details p { margin: 6px 0 0; }
   font-size: 20px;
   color: var(--muted);
 }
-.set.logged input { background: var(--good-bg); border-color: #2f5a3d; }
-.set.logged .check { background: var(--good); border-color: var(--good); color: #0b1a10; font-weight: 700; }
+.set.logged input { background: var(--good-bg); border-color: var(--good-line); }
+.set.logged .check { background: var(--good); border-color: var(--good); color: var(--good-ink); font-weight: 700; }
 
 .col-labels {
   display: grid;
@@ -291,12 +370,12 @@ details p { margin: 6px 0 0; }
   font-weight: 600;
   margin: 0 6px 6px 0;
 }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #17140b; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btn.danger { color: var(--bad); }
 
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .seg button { border: 0; background: var(--bg); padding: 8px 18px; font-weight: 600; color: var(--muted); }
-.seg button.active { background: var(--accent); color: #17140b; }
+.seg button.active { background: var(--accent); color: var(--accent-ink); }
 
 .err { color: var(--bad); }
 
@@ -431,7 +510,7 @@ input:focus { outline: none; border-color: var(--accent) !important; }
   font-weight: 600;
   white-space: nowrap;
 }
-.chip.on { background: #26231a; border-color: var(--accent); color: var(--accent); }
+.chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
 .add-ex {
   width: 100%;
@@ -469,3 +548,70 @@ input:focus { outline: none; border-color: var(--accent) !important; }
 .pick small { display: block; color: var(--muted); font-size: 13px; }
 .pick:disabled { opacity: 0.4; }
 .pick.create b { color: var(--accent); }
+
+/* ---------- completed days ---------- */
+
+.day.done small { color: var(--good); font-weight: 700; }
+.day.done b { text-decoration: line-through; text-decoration-thickness: 2px; text-decoration-color: var(--good); color: var(--muted); }
+.day.done.active b { color: var(--text); }
+
+.complete {
+  width: 100%;
+  margin: 4px 0 16px;
+  padding: 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--good);
+  background: none;
+  color: var(--good);
+  font-size: 17px;
+  font-weight: 700;
+}
+.completed-note {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--good-bg);
+  border: 1px solid var(--good-line);
+  color: var(--good);
+  font-weight: 700;
+}
+.completed-note button { background: none; border: 0; color: var(--muted); font-weight: 600; text-decoration: underline; }
+
+.viewing {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--good-bg);
+  border: 1px solid var(--good-line);
+  font-size: 14px;
+}
+.viewing b { color: var(--good); }
+.viewing button { background: none; border: 0; color: var(--accent); font-weight: 700; white-space: nowrap; }
+
+/* ---------- theme picker ---------- */
+
+.themes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.theme {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  text-align: left;
+  font-size: 14px;
+  font-weight: 600;
+}
+.theme.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.swatch { display: flex; flex: none; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); }
+.swatch i { display: block; width: 10px; height: 26px; }
+.theme small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }

@@ -6,6 +6,8 @@ A one-page workout tracker. It runs on GitHub Pages and stores your routines and
 - Each exercise shows last session's numbers, a warm-up suggestion for the main lifts, and an "Add weight" flag once you hit the top of the rep range on every set.
 - Every tap is saved on the device right away, then to Dropbox a moment later. It works offline and catches up when you're back online.
 - Tap **+ Set** to log more sets than the plan calls for.
+- Tap **Complete workout** to cross the day off for the week (the week starts Monday by default; change it in Settings). The app opens on the next day you haven't done. Tap a day you finished earlier in the week to see what you logged.
+- Themes in Settings: Gold, Ocean, Light, and a color-blind friendly theme.
 - **Routines**: keep as many as you like and switch which one is active. Add, rename, reorder or delete days. Add exercises from a built-in catalog of about 100 (search or filter by muscle), or type a name to create your own. Swap an exercise, change sets and rep range, toggle warm-up sets, and pair exercises into supersets.
 - History follows the exercise, not the routine slot. Swap an exercise out and back in later and its history is still there.
 - Two devices can edit at once. Changes merge row by row; the newer edit wins.

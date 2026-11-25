@@ -9,7 +9,7 @@ const state = {
   view: "workout",      // workout | history | exercise | routines | routine | picker | settings
   dayId: null,
   date: today(),
-  followToday: true,    // keep the date on "today" if the app stays open past midnight
+  dateMode: "today",    // today | viewing (a day completed earlier this week) | manual (picked a date)
   exerciseId: null,     // exercise history view
   routineId: null,      // routine editor
   openRow: null,        // expanded exercise row in the editor
@@ -68,6 +68,29 @@ function rangeText(lo, hi) {
   return lo === hi ? `${lo}` : `${lo}–${hi}`;
 }
 
+function addDays(iso, n) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const t = new Date(y, m - 1, d + n);
+  const pad = (x) => String(x).padStart(2, "0");
+  return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
+}
+
+function weekday(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).getDay();
+}
+
+// Days of the active routine completed this week (since the chosen first day
+// of the week, through today): Map dayId -> most recent date it was completed.
+function doneThisWeek() {
+  const t = today();
+  const start = Number(db.getSetting("week_start", "1"));
+  const from = addDays(t, -((weekday(t) - start + 7) % 7));
+  const out = new Map();
+  for (const c of db.completionsBetween(from, t)) if (!out.has(c.dayId)) out.set(c.dayId, c.date);
+  return out;
+}
+
 function inputFocused() {
   const a = document.activeElement;
   return a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA") && main.contains(a);
@@ -107,10 +130,25 @@ function defaultDay() {
   const list = activeDays();
   if (!list.length) return null;
   const ids = list.map((d) => d.id);
-  // Something already logged on this date? Stay on that day.
-  const loggedToday = db.daysLoggedOn(state.date).find((id) => ids.includes(id));
+  // Something already logged or completed on this date? Stay on that day.
+  const loggedToday = db.daysLoggedOn(state.date).find((id) => ids.includes(id))
+    || ids.find((id) => db.isComplete(state.date, id));
   if (loggedToday) return loggedToday;
-  // Otherwise the day after the last one you did.
+  // Using "Complete workout": the next day this week that isn't done yet,
+  // counting on from the one you finished most recently.
+  if (state.date === today() && db.hasAnyCompletions()) {
+    const done = doneThisWeek();
+    // doneThisWeek is ordered newest first (by date, then by when you tapped Complete).
+    const latest = [...done.entries()].find(([id]) => ids.includes(id));
+    if (!latest) return ids[0];
+    const i = ids.indexOf(latest[0]);
+    for (let k = 1; k <= ids.length; k++) {
+      const cand = ids[(i + k) % ids.length];
+      if (!done.has(cand)) return cand;
+    }
+    return ids[(i + 1) % ids.length];
+  }
+  // Otherwise the day after the last one you logged.
   const last = db.lastDayLogged(ids);
   if (!last) return ids[0];
   return ids[(ids.indexOf(last) + 1) % ids.length];
@@ -220,22 +258,36 @@ function renderWorkout() {
   const rows = db.dayExercises(day.id);
   const letters = supersetLetters(rows);
   const isToday = state.date === today();
+  const done = doneThisWeek();
+  const completed = db.isComplete(state.date, day.id);
+
+  let dateNote = "";
+  if (state.dateMode === "viewing") {
+    dateNote = `<div class="viewing"><span><b>✓ Completed</b> ${esc(prettyDate(state.date))}</span><button data-act="to-today">Back to today</button></div>`;
+  } else if (!isToday) {
+    dateNote = `<p class="tempo"><b>Editing ${esc(prettyDate(state.date))}.</b> <button class="linkish" data-act="to-today">Back to today</button></p>`;
+  }
 
   main.innerHTML = `
     <button class="routine-link" data-act="routines">${esc(r.name)} ›</button>
     <div class="days" style="--cols: ${Math.min(list.length, 4)}">
       ${list.map((d, i) => `
-        <button class="day${d.id === day.id ? " active" : ""}" data-act="day" data-id="${esc(d.id)}">
-          <small>Day ${i + 1}</small><b>${esc(d.name)}</b>
+        <button class="day${d.id === day.id ? " active" : ""}${done.has(d.id) ? " done" : ""}" data-act="day" data-id="${esc(d.id)}"
+          aria-label="Day ${i + 1}, ${esc(d.name)}${done.has(d.id) ? ", completed this week" : ""}">
+          <small>${done.has(d.id) ? "✓ " : ""}Day ${i + 1}</small><b>${esc(d.name)}</b>
         </button>`).join("")}
     </div>
     <div class="dateline">
       <h1>${esc(day.name)}${day.subtitle ? `<span>${esc(day.subtitle)}</span>` : ""}</h1>
       <input type="date" id="date" value="${state.date}" max="${today()}" aria-label="Workout date">
     </div>
-    ${!isToday || r.tempo ? `<p class="tempo">${isToday ? "" : `<b>Editing ${esc(prettyDate(state.date))}.</b> `}${r.tempo ? `Tempo <b>${esc(r.tempo)}</b>` : ""}</p>` : ""}
+    ${dateNote}
+    ${r.tempo ? `<p class="tempo">Tempo <b>${esc(r.tempo)}</b></p>` : ""}
     ${rows.length ? rows.map((row) => cardHtml(row, letters.get(row.id))).join("")
       : `<p class="empty">No exercises on this day. <button class="linkish" data-act="edit-routine" data-id="${esc(rid)}">Add some</button>.</p>`}
+    ${completed
+      ? `<div class="completed-note"><span>✓ ${esc(day.name)} complete</span><button data-act="uncomplete">Undo</button></div>`
+      : `<button class="complete" data-act="complete">Complete workout</button>`}
   `;
 }
 
@@ -336,7 +388,7 @@ function renderHistory() {
     const order = [...planOrder, ...[...byEx.keys()].filter((id) => !planOrder.includes(id))];
     return `
       <section class="card session">
-        <h3>${esc(prettyDate(s.date))}${s.dayName ? ` <span>· ${esc(s.dayName)}</span>` : ""}</h3>
+        <h3>${esc(prettyDate(s.date))}${s.dayName ? ` <span>· ${esc(s.dayName)}${db.isComplete(s.date, s.dayId) ? " ✓" : ""}</span>` : ""}</h3>
         ${order.map((id) => `
           <div class="row"><button class="name linkish" data-act="ex-history" data-id="${esc(id)}">${esc(db.exercise(id).name)}</button>
           <span class="vals">${byEx.get(id).sort((a, b) => a.set_no - b.set_no).map(setText).join(" · ")}</span></div>`).join("")}
@@ -614,6 +666,24 @@ function renderSettings() {
       ${dropbox}
     </section>
     <section class="card setting">
+      <h3>Theme</h3>
+      <div class="themes">
+        ${THEMES.map((t) => `
+          <button class="theme${currentTheme() === t.id ? " on" : ""}" data-act="theme" data-id="${t.id}">
+            <span class="swatch">${t.colors.map((c) => `<i style="background:${c}"></i>`).join("")}</span>
+            <span>${esc(t.name)}${t.note ? `<small>${esc(t.note)}</small>` : ""}</span>
+          </button>`).join("")}
+      </div>
+    </section>
+    <section class="card setting">
+      <h3>Week starts on</h3>
+      <p>Completed workouts reset at the start of each week.</p>
+      <div class="seg">
+        <button data-act="week-start" data-id="1" class="${db.getSetting("week_start", "1") === "1" ? "active" : ""}">Monday</button>
+        <button data-act="week-start" data-id="0" class="${db.getSetting("week_start", "1") === "0" ? "active" : ""}">Sunday</button>
+      </div>
+    </section>
+    <section class="card setting">
       <h3>Units</h3>
       <p>Old entries are converted for display.</p>
       <div class="seg">
@@ -627,6 +697,32 @@ function renderSettings() {
       <button class="btn" data-act="export">Download database</button>
     </section>`;
   prepareConnectLink();
+}
+
+// ---------- themes (per device) ----------
+
+const THEMES = [
+  { id: "gold", name: "Gold", colors: ["#111214", "#c9b26b", "#4fb477"], bar: "#111214" },
+  { id: "ocean", name: "Ocean", colors: ["#0e1319", "#5aa9e6", "#4fb477"], bar: "#0e1319" },
+  { id: "light", name: "Light", colors: ["#f4f4f1", "#8a6d1f", "#23864a"], bar: "#f4f4f1" },
+  { id: "colorblind", name: "Color-blind friendly", note: "Blue, orange, yellow", colors: ["#111214", "#e69f00", "#56b4e9"], bar: "#111214" },
+];
+
+function currentTheme() {
+  try {
+    return localStorage.getItem("wt.theme") || "gold";
+  } catch {
+    return "gold";
+  }
+}
+
+function applyTheme(id) {
+  const t = THEMES.find((x) => x.id === id) || THEMES[0];
+  document.documentElement.dataset.theme = t.id;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", t.bar);
+  try {
+    localStorage.setItem("wt.theme", t.id);
+  } catch { /* private mode: theme just won't persist */ }
 }
 
 // ---------- top-level render ----------
@@ -729,7 +825,39 @@ sync.onPulled(() => {
 // ---------- actions ----------
 
 const actions = {
-  "day": (id) => { state.dayId = id; render(); },
+  "day": (id) => {
+    // Picked a date yourself? Stay on it. Otherwise a day finished earlier this
+    // week opens what you did that day, and any other day opens today.
+    if (state.dateMode !== "manual") {
+      const doneOn = doneThisWeek().get(id);
+      if (doneOn && doneOn !== today()) {
+        state.date = doneOn;
+        state.dateMode = "viewing";
+      } else {
+        state.date = today();
+        state.dateMode = "today";
+      }
+    }
+    state.dayId = id;
+    render();
+  },
+  "to-today": () => {
+    state.date = today();
+    state.dateMode = "today";
+    render();
+  },
+  "complete": async () => {
+    const d = db.day(state.dayId);
+    db.setComplete(state.date, state.dayId, d ? d.name : null, true);
+    render();
+    await changed();
+  },
+  "uncomplete": async () => {
+    db.setComplete(state.date, state.dayId, null, false);
+    if (state.dateMode === "viewing") state.dateMode = "manual";
+    render();
+    await changed();
+  },
   "ex-history": (id) => { state.backTo = state.view === "exercise" ? state.backTo : state.view; go("exercise", { exerciseId: id }); },
   "back": () => go(state.backTo || "workout"),
   "routines": () => go("routines"),
@@ -844,6 +972,8 @@ const actions = {
     render();
   },
   "unit": async (u) => { db.setSetting("unit", u); render(); await changed(); },
+  "week-start": async (v) => { db.setSetting("week_start", v); render(); await changed(); },
+  "theme": (t) => { applyTheme(t); render(); },
   "connect": () => dbx.startConnect(),
   "dbx-code-go": async () => {
     const input = document.getElementById("dbx-code");
@@ -963,7 +1093,7 @@ main.addEventListener("change", async (e) => {
   if (t.id === "date") {
     if (!t.value) return;
     state.date = t.value > today() ? today() : t.value;
-    state.followToday = state.date === today();
+    state.dateMode = state.date === today() ? "today" : "manual";
     state.dayId = defaultDay();
     render();
     return;
@@ -1009,7 +1139,7 @@ main.addEventListener("focusout", () => {
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
-  if (state.followToday && state.date !== today()) {
+  if (state.dateMode === "today" && state.date !== today()) {
     state.date = today();
     state.dayId = defaultDay();
     if (!inputFocused()) render();
@@ -1022,6 +1152,7 @@ window.addEventListener("online", () => sync.syncNow());
 // ---------- start ----------
 
 async function start() {
+  applyTheme(currentTheme());
   try {
     await db.init();
   } catch (e) {

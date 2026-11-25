@@ -53,6 +53,15 @@ CREATE TABLE IF NOT EXISTS routine_days (
   updated_at INTEGER NOT NULL,
   deleted    INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS completions (   -- a day marked done on a date
+  id           TEXT PRIMARY KEY,           -- "date|dayId"
+  session_date TEXT NOT NULL,
+  day_id       TEXT NOT NULL,
+  day_name     TEXT,
+  updated_at   INTEGER NOT NULL,
+  deleted      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS completions_by_date ON completions (session_date);
 CREATE TABLE IF NOT EXISTS day_exercises (
   id             TEXT PRIMARY KEY,
   day_id         TEXT NOT NULL,
@@ -71,11 +80,11 @@ CREATE TABLE IF NOT EXISTS day_exercises (
 // Stored in the file header (PRAGMA user_version). Bump it whenever the schema
 // changes. An app that finds a newer file than it understands refuses to merge
 // or upload, so an out-of-date copy can never save over newer data.
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export class NewerFileError extends Error {}
 
-const TABLES = ["sets", "meta", "exercises", "routines", "routine_days", "day_exercises"];
+const TABLES = ["sets", "meta", "exercises", "routines", "routine_days", "day_exercises", "completions"];
 
 let SQL = null;
 let db = null;
@@ -542,4 +551,29 @@ export function exerciseHistory(exerciseId, limit = 30) {
 
 export function setCount() {
   return one("SELECT COUNT(*) AS n FROM sets WHERE deleted = 0").n;
+}
+
+// ---------- completed workouts ----------
+
+export function setComplete(date, dayId, dayName, done) {
+  const id = `${date}|${dayId}`;
+  if (done) put("completions", { id, session_date: date, day_id: dayId, day_name: dayName });
+  else db.run("UPDATE completions SET deleted = 1, updated_at = ? WHERE id = ?", [Date.now(), id]);
+}
+
+export function isComplete(date, dayId) {
+  return Boolean(one("SELECT 1 AS x FROM completions WHERE id = ? AND deleted = 0", [`${date}|${dayId}`]));
+}
+
+// Completed days between two dates (inclusive), newest first: [{ date, dayId }].
+export function completionsBetween(from, to) {
+  return all(
+    `SELECT session_date, day_id FROM completions WHERE deleted = 0 AND session_date BETWEEN ? AND ?
+     ORDER BY session_date DESC, updated_at DESC`,
+    [from, to]
+  ).map((r) => ({ date: r.session_date, dayId: r.day_id }));
+}
+
+export function hasAnyCompletions() {
+  return Boolean(one("SELECT 1 AS x FROM completions LIMIT 1"));
 }
