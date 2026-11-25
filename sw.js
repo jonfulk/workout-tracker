@@ -2,7 +2,7 @@
 // online, and the app still opens in a gym basement with no signal.
 // Only this site's own files are cached; Dropbox calls pass straight through.
 
-const CACHE = "workout-tracker-v4";
+const CACHE = "workout-tracker-v5";
 
 self.addEventListener("install", () => self.skipWaiting());
 
@@ -21,8 +21,12 @@ self.addEventListener("fetch", (event) => {
   // OAuth redirect URLs carry a one-time code; never cache those.
   if (url.searchParams.has("code") || url.searchParams.has("error")) return;
 
+  // cache: "no-cache" makes the browser check with GitHub before reusing a file
+  // (a quick 304 when nothing changed). Without it, GitHub's 10-minute cache
+  // can serve new styles with an old script right after an update.
+  // Fetch by URL: a navigation Request can't be re-created with options.
   event.respondWith(
-    fetch(req)
+    fetch(url.href, { cache: "no-cache", credentials: "same-origin" })
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();
