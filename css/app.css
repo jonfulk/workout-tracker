@@ -693,3 +693,12 @@ input:focus { outline: none; border-color: var(--accent) !important; }
 .theme small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
 
 .version { text-align: center; color: var(--muted); font-size: 12px; margin: 4px 0 20px; }
+
+/* ---------- weight moved ---------- */
+
+.lifetime { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.lifetime span { color: var(--muted); font-size: 14px; }
+.lifetime b { font-size: 22px; color: var(--accent); white-space: nowrap; }
+.session-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.session-head h3 { margin: 0; }
+.session-vol { color: var(--accent); font-weight: 700; font-size: 14px; white-space: nowrap; }

@@ -4,7 +4,7 @@
 
 // Bump APP_VERSION here and in js/version.js on every release: a changed
 // sw.js is what tells browsers an update exists.
-const APP_VERSION = "10";
+const APP_VERSION = "11";
 const CACHE = `workout-tracker-v${APP_VERSION}`;
 
 self.addEventListener("install", () => self.skipWaiting());

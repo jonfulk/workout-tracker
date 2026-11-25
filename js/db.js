@@ -632,3 +632,9 @@ export function completionsBetween(from, to) {
 export function hasAnyCompletions() {
   return Boolean(one("SELECT 1 AS x FROM completions LIMIT 1"));
 }
+
+// Total weight moved (weight × reps) across all logged sets, by stored unit.
+// Assisted sets (negative weight) don't count.
+export function volumeByUnit() {
+  return all("SELECT unit, SUM(weight * reps) AS v FROM sets WHERE deleted = 0 AND weight > 0 GROUP BY unit");
+}

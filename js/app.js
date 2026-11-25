@@ -380,13 +380,28 @@ async function editLoggedSet(rowEl) {
 
 // ---------- history views ----------
 
+// Weight × reps in the display unit. Assisted (negative) sets count as zero.
+function volume(sets) {
+  return sets.reduce((sum, x) => sum + Math.max(0, toUnit(x.weight, x.unit) || 0) * x.reps, 0);
+}
+
+function fmtVolume(v) {
+  return `${Math.round(v).toLocaleString()} ${unit()}`;
+}
+
 function renderHistory() {
   const sessions = db.history();
   if (!sessions.length) {
     main.innerHTML = `<h1 class="page-title">History</h1><p class="empty">Nothing logged yet.</p>`;
     return;
   }
-  main.innerHTML = `<h1 class="page-title">History</h1>` + sessions.map((s) => {
+  const lifetime = db.volumeByUnit().reduce((sum, r) => sum + Math.max(0, toUnit(r.v, r.unit)), 0);
+  main.innerHTML = `
+    <h1 class="page-title">History</h1>
+    <section class="card lifetime">
+      <span>Lifetime weight moved</span>
+      <b>${fmtVolume(lifetime)}</b>
+    </section>` + sessions.map((s) => {
     const byEx = new Map();
     for (const x of s.sets) {
       if (!byEx.has(x.exercise_id)) byEx.set(x.exercise_id, []);
@@ -397,7 +412,10 @@ function renderHistory() {
     const order = [...planOrder, ...[...byEx.keys()].filter((id) => !planOrder.includes(id))];
     return `
       <section class="card session">
-        <h3>${esc(prettyDate(s.date))}${s.dayName ? ` <span>· ${esc(s.dayName)}${db.isComplete(s.date, s.dayId) ? " ✓" : ""}</span>` : ""}</h3>
+        <div class="session-head">
+          <h3>${esc(prettyDate(s.date))}${s.dayName ? ` <span>· ${esc(s.dayName)}${db.isComplete(s.date, s.dayId) ? " ✓" : ""}</span>` : ""}</h3>
+          <span class="session-vol">${fmtVolume(volume(s.sets))}</span>
+        </div>
         ${order.map((id) => `
           <div class="row"><button class="name linkish" data-act="ex-history" data-id="${esc(id)}">${esc(db.exercise(id).name)}</button>
           <span class="vals">${byEx.get(id).sort((a, b) => a.set_no - b.set_no).map(setText).join(" · ")}</span></div>`).join("")}
