@@ -19,7 +19,7 @@ export const PLAN = [
       { id: "machine-chest-press", name: "Machine Chest Press", sets: 3, reps: [8, 10], main: true,
         note: "Bring your elbows together at the top." },
       { id: "machine-shoulder-press", name: "Machine Shoulder Press", sets: 2, reps: [8, 10], main: true,
-        note: "Pull elbows down toward ribs, chest tall, avoid leaning back." },
+        note: "Back flat against the pad, chest tall. Lower until your hands reach about chin level, press straight up without locking your elbows." },
       { id: "lateral-raise", name: "Lateral Raise", sets: 3, reps: [10, 15],
         note: "Lead with your elbows, avoid shrugging, control when lowering the weight." },
       { id: "overhead-rope-extension", name: "Overhead Rope Extension", sets: 2, reps: [10, 15],
