@@ -117,7 +117,9 @@ async function doSync() {
     throw new Error("Kept colliding with another device. Will retry.");
   } catch (e) {
     console.error(e);
-    if (e instanceof dbx.DropboxError && e.summary === "revoked") {
+    if (e instanceof db.NewerFileError) {
+      setStatus("error", e.message);
+    } else if (e instanceof dbx.DropboxError && e.summary === "revoked") {
       localStorage.removeItem(K.rev);
       setStatus("error", "Dropbox disconnected. Reconnect in Settings.");
     } else if (!navigator.onLine || e instanceof TypeError) {

@@ -68,6 +68,13 @@ CREATE TABLE IF NOT EXISTS day_exercises (
 );
 `;
 
+// Stored in the file header (PRAGMA user_version). Bump it whenever the schema
+// changes. An app that finds a newer file than it understands refuses to merge
+// or upload, so an out-of-date copy can never save over newer data.
+export const SCHEMA_VERSION = 2;
+
+export class NewerFileError extends Error {}
+
 const TABLES = ["sets", "meta", "exercises", "routines", "routine_days", "day_exercises"];
 
 let SQL = null;
@@ -134,7 +141,14 @@ export function uid() {
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+function fileVersion(d) {
+  return allIn(d, "PRAGMA user_version")[0].user_version;
+}
+
 function migrate(d) {
+  if (fileVersion(d) > SCHEMA_VERSION) {
+    throw new NewerFileError("A newer version of this app saved your data. Reload the page to update.");
+  }
   d.exec(SCHEMA);
   if (!columns(d, "sets").includes("day_name")) {
     d.exec("ALTER TABLE sets ADD COLUMN day_name TEXT");
@@ -143,6 +157,7 @@ function migrate(d) {
   for (const day of STARTER.days) {
     d.run("UPDATE sets SET day_name = ? WHERE day_id = ? AND day_name IS NULL", [day.name, day.id]);
   }
+  if (fileVersion(d) < SCHEMA_VERSION) d.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
 function openBytes(bytes) {
