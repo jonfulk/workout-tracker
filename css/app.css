@@ -67,6 +67,81 @@
   color-scheme: light;
 }
 
+[data-theme="orange"] {
+  --bg: #15110e;
+  --card: #1f1915;
+  --line: #3a2e25;
+  --text: #f3ece6;
+  --muted: #a89a8e;
+  --placeholder: #6b5e54;
+  --accent: #f08a3c;
+  --accent-ink: #1e0f03;
+  --accent-soft: #33200f;
+  --banner-bg: #33200f;
+  --banner-text: #f8c9a2;
+  --pop-bg: #261f1a;
+  --header-bg: rgba(21, 17, 14, 0.96);
+}
+
+/* Red accent, so problems use orange instead of a second red. */
+[data-theme="red"] {
+  --bg: #140f10;
+  --card: #1e1718;
+  --line: #3a2a2c;
+  --text: #f3eaea;
+  --muted: #a8979a;
+  --placeholder: #6b5b5e;
+  --accent: #e5484d;
+  --accent-ink: #ffffff;
+  --accent-soft: #34181a;
+  --warn: #e8c547;
+  --bad: #f08a3c;
+  --banner-bg: #34181a;
+  --banner-text: #f5b8ba;
+  --pop-bg: #261c1d;
+  --header-bg: rgba(20, 15, 16, 0.96);
+}
+
+[data-theme="pink"] {
+  --bg: #fdf3f6;
+  --card: #ffffff;
+  --line: #f0d3de;
+  --text: #2a1a21;
+  --muted: #8a6a77;
+  --placeholder: #c9a9b6;
+  --accent: #d6457f;
+  --accent-ink: #ffffff;
+  --accent-soft: #fbe1eb;
+  --good: #23864a;
+  --good-bg: #e3f3e8;
+  --good-line: #9fd0b0;
+  --good-ink: #ffffff;
+  --warn: #b7791f;
+  --bad: #c53030;
+  --banner-bg: #fbe1eb;
+  --banner-text: #7a1f45;
+  --pop-bg: #ffffff;
+  --header-bg: rgba(253, 243, 246, 0.96);
+  --shadow: rgba(80, 20, 45, 0.15);
+  color-scheme: light;
+}
+
+[data-theme="purple"] {
+  --bg: #120f17;
+  --card: #1b1722;
+  --line: #322a3e;
+  --text: #efeaf5;
+  --muted: #a097ad;
+  --placeholder: #645b70;
+  --accent: #a78bfa;
+  --accent-ink: #160b2e;
+  --accent-soft: #261d38;
+  --banner-bg: #261d38;
+  --banner-text: #d9ccfc;
+  --pop-bg: #231d2c;
+  --header-bg: rgba(18, 15, 23, 0.96);
+}
+
 /* Okabe–Ito colors: blue for done, orange for accent, yellow for saving,
    vermillion for problems. Distinguishable with every common type of color
    blindness, and done/logged states also carry a ✓ so color is never the only cue. */

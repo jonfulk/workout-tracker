@@ -713,6 +713,10 @@ const THEMES = [
   { id: "gold", name: "Gold", colors: ["#111214", "#c9b26b", "#4fb477"], bar: "#111214" },
   { id: "ocean", name: "Ocean", colors: ["#0e1319", "#5aa9e6", "#4fb477"], bar: "#0e1319" },
   { id: "light", name: "Light", colors: ["#f4f4f1", "#8a6d1f", "#23864a"], bar: "#f4f4f1" },
+  { id: "orange", name: "Orange", colors: ["#15110e", "#f08a3c", "#4fb477"], bar: "#15110e" },
+  { id: "red", name: "Red", colors: ["#140f10", "#e5484d", "#4fb477"], bar: "#140f10" },
+  { id: "pink", name: "Pink", colors: ["#fdf3f6", "#d6457f", "#23864a"], bar: "#fdf3f6" },
+  { id: "purple", name: "Purple", colors: ["#120f17", "#a78bfa", "#4fb477"], bar: "#120f17" },
   { id: "colorblind", name: "Color-blind friendly", note: "Blue, orange, yellow", colors: ["#111214", "#e69f00", "#56b4e9"], bar: "#111214" },
 ];
 
