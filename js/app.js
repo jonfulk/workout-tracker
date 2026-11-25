@@ -142,16 +142,24 @@ function cardHtml(row, letter) {
   const count = Math.max(row.sets, ...loggedNos, 0) + extra;
   const done = loggedNos.length >= row.sets;
 
+  // Last session's top set: the heaviest weight (for assisted work, the least
+  // assistance), and on a tie the one with the most reps. Every set starts there.
+  const top = last && last.sets.length
+    ? last.sets.reduce((a, b) => {
+        const wa = toUnit(a.weight, a.unit), wb = toUnit(b.weight, b.unit);
+        return wb > wa || (wb === wa && b.reps > a.reps) ? b : a;
+      })
+    : null;
+
   let rows = "";
   for (let n = 1; n <= count; n++) {
     const s = logged[n];
-    // Placeholders: weight from the set you just did, else last session;
-    // reps from the same set last session. A blank box logs its placeholder.
-    const prev = last ? last.sets.find((x) => x.set_no === n) || last.sets[last.sets.length - 1] : null;
+    // Placeholders: the set you just did today, else last session's top set.
+    // A blank box logs its placeholder.
     const earlier = logged[n - 1];
-    const wSrc = earlier || prev;
-    const phW = wSrc ? fmt(toUnit(wSrc.weight, wSrc.unit)) : unit();
-    const phR = prev ? prev.reps : earlier ? earlier.reps : rangeText(row.rep_lo, row.rep_hi);
+    const src = earlier || top;
+    const phW = src ? fmt(toUnit(src.weight, src.unit)) : unit();
+    const phR = src ? src.reps : rangeText(row.rep_lo, row.rep_hi);
     const bonus = n > row.sets ? `<span class="optional">extra</span>` : "";
     rows += `
       <div class="set${s ? " logged" : ""}" data-set="${n}">
