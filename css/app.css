@@ -122,19 +122,13 @@ main { max-width: 640px; margin: 0 auto; padding: 0 12px; }
 
 /* ---------- day + date ---------- */
 
+/* Up to four days per row; more wrap onto the next row. */
 .days {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(76px, 1fr);
+  grid-template-columns: repeat(var(--cols, 4), 1fr);
   gap: 6px;
   margin: 6px 0 10px;
-  overflow-x: auto;
-  scrollbar-width: none;
 }
-.days::-webkit-scrollbar { display: none; }
-.days.fade-right { -webkit-mask-image: linear-gradient(to right, #000 85%, transparent); mask-image: linear-gradient(to right, #000 85%, transparent); }
-.days.fade-left { -webkit-mask-image: linear-gradient(to left, #000 85%, transparent); mask-image: linear-gradient(to left, #000 85%, transparent); }
-.days.fade-left.fade-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 15%, #000 85%, transparent); mask-image: linear-gradient(to right, transparent, #000 15%, #000 85%, transparent); }
 
 .day {
   padding: 8px 4px;

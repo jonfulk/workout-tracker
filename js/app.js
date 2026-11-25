@@ -223,7 +223,7 @@ function renderWorkout() {
 
   main.innerHTML = `
     <button class="routine-link" data-act="routines">${esc(r.name)} ›</button>
-    <div class="days">
+    <div class="days" style="--cols: ${Math.min(list.length, 4)}">
       ${list.map((d, i) => `
         <button class="day${d.id === day.id ? " active" : ""}" data-act="day" data-id="${esc(d.id)}">
           <small>Day ${i + 1}</small><b>${esc(d.name)}</b>
@@ -261,29 +261,6 @@ function cascadePlaceholders(fromRow) {
     }
     next = next.nextElementSibling;
   }
-}
-
-// Day strip: keep the selected day in view, and fade whichever edge has more
-// days past it so it's clear the strip scrolls.
-function fitDayStrip() {
-  const strip = main.querySelector(".days");
-  if (!strip) return;
-  const active = strip.querySelector(".day.active");
-  if (active) {
-    const s = strip.getBoundingClientRect();
-    const a = active.getBoundingClientRect();
-    if (a.left < s.left || a.right > s.right) {
-      strip.scrollLeft += a.left - s.left - (s.width - a.width) / 2;
-    }
-  }
-  updateStripFade(strip);
-  strip.addEventListener("scroll", () => updateStripFade(strip), { passive: true });
-}
-
-function updateStripFade(strip) {
-  const more = strip.scrollWidth - strip.clientWidth;
-  strip.classList.toggle("fade-right", more > 1 && strip.scrollLeft < more - 1);
-  strip.classList.toggle("fade-left", more > 1 && strip.scrollLeft > 1);
 }
 
 function rerenderCard(exId) {
@@ -528,6 +505,10 @@ async function choose(exerciseId) {
   }
   state.picker = null;
   go("routine");
+  // Land back where you were building: the row you just added or swapped.
+  const el = main.querySelector(`.ed-row[data-row="${CSS.escape(state.openRow)}"]`);
+  if (el) el.scrollIntoView({ block: "center" });
+  else window.scrollTo(0, state.editorScroll || 0);
   await changed();
 }
 
@@ -656,7 +637,7 @@ function render() {
   state.renderPending = false;
   const navView = state.view in NAV_FOR ? NAV_FOR[state.view] ?? state.backTo : state.view;
   for (const b of document.querySelectorAll(".nav")) b.classList.toggle("active", b.dataset.view === navView);
-  if (state.view === "workout") { renderWorkout(); fitDayStrip(); }
+  if (state.view === "workout") renderWorkout();
   else if (state.view === "history") renderHistory();
   else if (state.view === "exercise") renderExercise();
   else if (state.view === "routines") renderRoutines();
@@ -837,7 +818,11 @@ const actions = {
   "swap": (rowId) => openPicker({ mode: "swap", dayId: rowById(rowId).day_id, rowId }),
 
   // picker
-  "close-picker": () => { state.picker = null; go("routine"); },
+  "close-picker": () => {
+    state.picker = null;
+    go("routine");
+    window.scrollTo(0, state.editorScroll || 0);
+  },
   "muscle": (m) => {
     state.pickerMuscle = m;
     for (const c of main.querySelectorAll(".chips .chip")) c.classList.toggle("on", c.dataset.id === m);
@@ -905,6 +890,7 @@ function rowById(id) {
 }
 
 function openPicker(picker) {
+  state.editorScroll = window.scrollY;
   state.picker = picker;
   state.pickerQuery = "";
   state.pickerMuscle = "All";
