@@ -3,6 +3,7 @@ import * as db from "./db.js";
 import * as dbx from "./dropbox.js";
 import * as sync from "./sync.js";
 import { APP_VERSION } from "./version.js";
+import { buzz, confetti } from "./celebrate.js";
 
 // ---------- state ----------
 
@@ -884,8 +885,12 @@ const actions = {
     const d = db.day(state.dayId);
     db.setComplete(state.date, state.dayId, d ? d.name : null, true);
     render();
+    buzz();
+    confetti();
+    showSummary(state.date, state.dayId);
     await changed();
   },
+  "close-summary": () => closeSummary(),
   "uncomplete": async () => {
     db.setComplete(state.date, state.dayId, null, false);
     // Un-completing a day you were viewing: keep working on that date.
@@ -1064,6 +1069,74 @@ const actions = {
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   },
 };
+
+// ---------- workout summary ----------
+
+function showSummary(date, dayId) {
+  const d = db.day(dayId);
+  const session = db.history(400).find((x) => x.date === date && x.dayId === dayId);
+  const sets = session ? session.sets : [];
+  const total = volume(sets);
+  const prev = db.history(400).find((x) => x.dayId === dayId && x.date < date);
+
+  // One line per exercise, in routine order: sets and the best set.
+  const byEx = new Map();
+  for (const x of sets) {
+    if (!byEx.has(x.exercise_id)) byEx.set(x.exercise_id, []);
+    byEx.get(x.exercise_id).push(x);
+  }
+  const order = db.dayExercises(dayId).map((r) => r.exercise_id).filter((id) => byEx.has(id));
+  for (const id of byEx.keys()) if (!order.includes(id)) order.push(id);
+  const lines = order.map((id) => {
+    const list = byEx.get(id);
+    const best = list.reduce((a, b) => {
+      const wa = toUnit(a.weight, a.unit), wb = toUnit(b.weight, b.unit);
+      return wb > wa || (wb === wa && b.reps > a.reps) ? b : a;
+    });
+    return `<div class="row"><span class="name">${esc(db.exercise(id).name)}</span>
+      <span class="vals">${list.length} set${list.length === 1 ? "" : "s"} · best ${setText(best)}</span></div>`;
+  }).join("");
+
+  let compare = "";
+  if (prev && total > 0) {
+    const diff = total - volume(prev.sets);
+    const label = esc(prettyDate(prev.date, { month: "short", day: "numeric" }));
+    compare = diff === 0
+      ? `<p class="sum-compare">Same as last time (${label})</p>`
+      : `<p class="sum-compare ${diff > 0 ? "up" : ""}">${diff > 0 ? "▲" : "▼"} ${fmtVolume(Math.abs(diff))} vs ${label}</p>`;
+  }
+
+  const overlay = document.createElement("div");
+  overlay.className = "overlay";
+  overlay.id = "summary";
+  overlay.innerHTML = `
+    <div class="summary" role="dialog" aria-modal="true" aria-label="Workout complete">
+      <p class="sum-kicker">Workout complete</p>
+      <h2>${esc(d ? d.name : "Workout")}</h2>
+      <p class="sum-date">${esc(prettyDate(date, { weekday: "long", month: "long", day: "numeric" }))}</p>
+      <div class="sum-stats">
+        <div><b>${fmtVolume(total)}</b><span>moved</span></div>
+        <div><b>${sets.length}</b><span>set${sets.length === 1 ? "" : "s"}</span></div>
+        <div><b>${order.length}</b><span>exercise${order.length === 1 ? "" : "s"}</span></div>
+      </div>
+      ${compare}
+      ${lines ? `<div class="sum-lines">${lines}</div>` : `<p class="info">No sets logged, but it still counts.</p>`}
+      <button class="btn primary sum-done" data-act="close-summary">Done</button>
+    </div>`;
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.closest("[data-act=close-summary]")) closeSummary();
+  });
+  document.body.appendChild(overlay);
+  overlay.querySelector(".sum-done").focus({ preventScroll: true });
+}
+
+function closeSummary() {
+  document.getElementById("summary")?.remove();
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeSummary();
+});
 
 function afterReset() {
   state.anchor = state.date = today();
