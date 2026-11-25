@@ -224,6 +224,59 @@ function seedStarter() {
   }
 }
 
+// ---------- clearing ----------
+// A clear is recorded as a moment in time (in meta, which syncs): every row
+// last changed at or before that moment counts as deleted, on every device,
+// including rows this device hasn't seen yet. Rows changed afterwards survive.
+
+const HISTORY_TABLES = ["sets", "completions"];
+const SETUP_TABLES = ["exercises", "routines", "routine_days", "day_exercises"];
+
+// Tombstone everything older than the recorded clears. Returns rows changed.
+function applyClears() {
+  let changed = 0;
+  const run = (tables, ts) => {
+    if (!ts) return;
+    for (const t of tables) {
+      db.run(`UPDATE ${t} SET deleted = 1, updated_at = ? WHERE deleted = 0 AND updated_at <= ?`, [ts, ts]);
+      changed += db.getRowsModified();
+    }
+  };
+  run(HISTORY_TABLES, Number(getSetting("history_cleared_at", 0)));
+  run(SETUP_TABLES, Number(getSetting("reset_at", 0)));
+  return changed;
+}
+
+export function clearHistory() {
+  const now = Date.now();
+  put("meta", { key: "history_cleared_at", value: String(now) }, now);
+  applyClears();
+}
+
+export function resetEverything() {
+  const now = Date.now();
+  put("meta", { key: "history_cleared_at", value: String(now) }, now);
+  put("meta", { key: "reset_at", value: String(now) }, now);
+  applyClears();
+  // Bring back the starter routine: same ids as the original seed, stamped
+  // just after the reset so they count as new.
+  const t = now + 1;
+  const st = STARTER;
+  put("routines", { id: st.id, name: st.name, tempo: st.tempo, created_at: 1 }, t);
+  st.days.forEach((day, i) => {
+    put("routine_days", { id: day.id, routine_id: st.id, name: day.name, subtitle: day.subtitle, position: i }, t);
+    day.exercises.forEach(([exId, sets, lo, hi, warmup, ssNext], j) => {
+      put("day_exercises", {
+        id: `${day.id}-${j}`, day_id: day.id, exercise_id: exId, position: j,
+        sets, rep_lo: lo, rep_hi: hi, warmup: warmup ? 1 : 0, superset_next: ssNext ? 1 : 0,
+      }, t);
+    });
+  });
+  put("meta", { key: "active_routine", value: st.id }, t);
+  put("meta", { key: "unit", value: "lb" }, t);
+  put("meta", { key: "week_start", value: "1" }, t);
+}
+
 export function exportBytes() {
   return db.export();
 }
@@ -270,6 +323,8 @@ export function merge(remoteBytes) {
         }
       }
     }
+    // A clear from another device applies to rows only this device had.
+    if (applyClears() > 0) localAhead = true;
     db.exec("COMMIT");
   } catch (e) {
     try { db.exec("ROLLBACK"); } catch (_) { /* already rolled back */ }

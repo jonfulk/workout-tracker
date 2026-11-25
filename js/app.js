@@ -705,6 +705,12 @@ function renderSettings() {
       <p>Download the SQLite file. ${db.setCount()} sets logged.</p>
       <button class="btn" data-act="export">Download database</button>
     </section>
+    <section class="card setting">
+      <h3>Start over</h3>
+      <p>These sync to Dropbox and your other devices, so reconnecting won't bring the old data back. Download a backup first if you might want it.</p>
+      <button class="btn danger" data-act="clear-history">Clear workout history</button>
+      <button class="btn danger" data-act="reset-all">Reset everything</button>
+    </section>
     <p class="version">Version ${APP_VERSION}</p>`;
   prepareConnectLink();
 }
@@ -1013,6 +1019,22 @@ const actions = {
     render();
   },
   "sync-now": () => sync.syncNow(),
+  "clear-history": async () => {
+    if (!confirm("Clear all logged sets and completed workouts? Your routines stay. This can't be undone.")) return;
+    db.clearHistory();
+    state.extraSets = {};
+    afterReset();
+    await changed();
+  },
+  "reset-all": async () => {
+    if (!confirm("Reset everything? This deletes all history, routines and custom exercises, and restores the starter plan and default settings. This can't be undone.")) return;
+    if (!confirm("Are you sure? Everything will be erased on all your devices.")) return;
+    db.resetEverything();
+    applyTheme("gold");
+    state.extraSets = {};
+    afterReset();
+    await changed();
+  },
   "export": () => {
     const blob = new Blob([db.exportBytes()], { type: "application/x-sqlite3" });
     const a = document.createElement("a");
@@ -1024,6 +1046,22 @@ const actions = {
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   },
 };
+
+function afterReset() {
+  state.anchor = state.date = today();
+  state.followToday = true;
+  state.dayId = defaultDay();
+  state.routineId = null;
+  state.openRow = null;
+  const msg = (bannerMessage = "Done. You're starting fresh.");
+  go("workout");
+  setTimeout(() => {
+    if (bannerMessage === msg) {
+      bannerMessage = "";
+      renderBanner();
+    }
+  }, 4000);
+}
 
 function rowById(id) {
   for (const d of db.days(state.routineId)) {
